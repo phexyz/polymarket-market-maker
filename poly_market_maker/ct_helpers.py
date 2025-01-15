@@ -58,3 +58,27 @@ class CTHelpers:
             ),
             byteorder="big",
         )
+
+    @staticmethod
+    def get_condition_id(oracle: str, question_id: str, outcome_slot_count: int) -> str:
+        """
+        Constructs a condition ID from the oracle address, question ID, and outcome slot count.
+
+        :param oracle: The address of the oracle as a hex string.
+        :param question_id: The question ID as a hex string.
+        :param outcome_slot_count: The outcome slot count as an integer.
+        :return: The condition ID as a hex string.
+        """
+        # Validate input
+        assert isinstance(oracle, str) and oracle.startswith("0x")
+        assert isinstance(question_id, str) and question_id.startswith("0x")
+        assert isinstance(outcome_slot_count, int)
+
+        # Encode and hash the input
+        encoded_data = (
+            bytes.fromhex(oracle[2:])
+            + bytes.fromhex(question_id[2:])
+            + outcome_slot_count.to_bytes(32, byteorder="big")
+        )
+        condition_id = Web3.keccak(encoded_data)
+        return condition_id.hex()

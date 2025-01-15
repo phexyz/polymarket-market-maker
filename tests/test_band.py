@@ -1,7 +1,7 @@
 import json
 from unittest import TestCase
 
-from poly_market_maker.token import Token
+from poly_market_maker.types import Token
 from poly_market_maker.order import Order, Side
 
 from poly_market_maker.strategies.bands import Band, Bands

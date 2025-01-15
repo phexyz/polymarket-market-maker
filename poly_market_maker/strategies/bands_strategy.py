@@ -1,4 +1,4 @@
-from poly_market_maker.token import Token, Collateral
+from poly_market_maker.types import Token, Collateral
 from poly_market_maker.order import Order, Side
 from poly_market_maker.orderbook import OrderBook
 

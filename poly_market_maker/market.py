@@ -1,7 +1,7 @@
 import logging
 
 from poly_market_maker.ct_helpers import CTHelpers
-from poly_market_maker.token import Token
+from poly_market_maker.types import Token
 
 
 class Market:

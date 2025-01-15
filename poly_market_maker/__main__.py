@@ -1,5 +1,6 @@
 import sys
 from poly_market_maker.app import App
+from poly_market_maker.app_front_run import AppFrontRun
 
 
-App(sys.argv[1:]).main()
+AppFrontRun(sys.argv[1:]).main()

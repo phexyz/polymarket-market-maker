@@ -4,7 +4,7 @@ import logging
 
 from poly_market_maker.orderbook import OrderBookManager
 from poly_market_maker.price_feed import PriceFeed
-from poly_market_maker.token import Token, Collateral
+from poly_market_maker.types import Token, Collateral
 from poly_market_maker.constants import MAX_DECIMALS
 
 from poly_market_maker.strategies.base_strategy import BaseStrategy
