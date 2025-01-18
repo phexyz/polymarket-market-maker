@@ -2,9 +2,7 @@ import logging
 from typing import Tuple
 from abc import ABC, abstractmethod
 
-from poly_market_maker.orderbook import OwnOrderBook
-from poly_market_maker.order import Order
-from poly_market_maker.types import MarketState
+from poly_market_maker.types import MarketState, Order
 
 
 class BaseStrategy(ABC):

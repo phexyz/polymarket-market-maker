@@ -1,8 +1,7 @@
 import logging
 from math import sqrt
 
-from poly_market_maker.types import Token, Collateral
-from poly_market_maker.order import Order, Side
+from poly_market_maker.types import Token, Collateral, Order, Side
 from poly_market_maker.utils import math_round_down
 
 

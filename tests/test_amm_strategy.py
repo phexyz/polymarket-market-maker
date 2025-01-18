@@ -3,9 +3,8 @@ from unittest import TestCase
 import uuid
 
 from poly_market_maker.market import Market
-from poly_market_maker.types import Token, Collateral
+from poly_market_maker.types import Token, Collateral, Order, Side
 from poly_market_maker.strategies.amm_strategy import AMMStrategy
-from poly_market_maker.order import Order, Side
 
 
 class OrderBook:

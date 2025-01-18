@@ -4,8 +4,39 @@ from pydantic import BaseModel
 from enum import Enum
 from dataclasses import dataclass
 from datetime import datetime
+from py_clob_client.order_builder.constants import BUY, SELL
+from typeguard import typechecked
+from py_clob_client.clob_types import OrderType
 
 
+class OwnOrderBook:
+    """Represents the current snapshot of the order book.
+
+    Attributes:
+        -orders: Current list of active orders.
+        -balances: Current balances state.
+        -orders_being_placed: `True` if at least one order is currently being placed. `False` otherwise.
+        -orders_being_cancelled: `True` if at least one orders is currently being cancelled. `False` otherwise.
+    """
+
+    def __init__(
+        self,
+        orders: list[Order],
+        balances: dict,
+        orders_being_placed: bool,
+        orders_being_cancelled: bool,
+    ):
+        assert isinstance(orders_being_placed, bool)
+        assert isinstance(orders_being_cancelled, bool)
+
+        self.orders = orders
+        self.balances = balances
+        self.orders_being_placed = orders_being_placed
+        self.orders_being_cancelled = orders_being_cancelled
+
+
+@typechecked
+@dataclass(frozen=True, slots=True)
 class Trade(BaseModel):
     id: int
     taker_order_id: str
@@ -259,29 +290,30 @@ class Token(Enum):
         return Token.B if self == Token.A else Token.A
 
 
-@dataclass
+@typechecked
+@dataclass(frozen=True, slots=True)
 class OrderBookEntry:
     price: float
     size: float
 
 
-@dataclass
+@typechecked
+@dataclass(slots=True)
 class MarketState:
     """Container for all market state information at a point in time"""
 
     timestamp: datetime
-    market: Market
 
     # Token prices
     away_team_price: float
     home_team_price: float
 
-    # Order book summary
+    # Market order book
     away_team_bids: List[OrderBookEntry]
     away_team_asks: List[OrderBookEntry]
 
-    # Balances
-    balances: Dict[Token, float]
+    # Our own orders and balances
+    own_orders: OwnOrderBook
 
     # Market summary stats
     away_team_mid_price: float = None
@@ -297,3 +329,159 @@ class MarketState:
             self.away_team_mid_price = (best_bid + best_ask) / 2
             self.home_team_mid_price = 1 - self.away_team_mid_price
             self.spread = best_ask - best_bid
+
+    def get_best_limit_price(self, token: Token, side: Side) -> float | None:
+        if side == Side.BUY:
+            return self.get_min_ask(token)
+        elif side == Side.SELL:
+            return self.get_max_bid(token)
+
+    def get_max_bid(self, token: Token) -> float | None:
+        bids = self.get_bids(token)
+        if not bids:
+            return None
+        return bids[0].price
+
+    def get_min_ask(self, token: Token) -> float | None:
+        asks = self.get_asks(token)
+        if not asks:
+            return None
+        return asks[0].price
+
+    def get_bids(self, token: Token) -> List[OrderBookEntry]:
+        """Get bids for the given token"""
+        if token == Token.A:
+            return self.away_team_bids
+        elif token == Token.B:
+            return [
+                OrderBookEntry(price=1 - bid.price, size=bid.size)
+                for bid in self.away_team_asks
+            ]
+        else:
+            raise ValueError(f"Invalid token {token} - must be Token.A or Token.B")
+
+    def get_asks(self, token: Token) -> List[OrderBookEntry]:
+        """Get asks for the given token"""
+        if token == Token.A:
+            return self.away_team_asks
+        elif token == Token.B:
+            return [
+                OrderBookEntry(price=1 - ask.price, size=ask.size)
+                for ask in self.away_team_bids
+            ]
+        else:
+            raise ValueError(f"Invalid token {token} - must be Token.A or Token.B")
+
+    def get_mid_price(self, token: Token) -> float:
+        """Get mid price for the given token"""
+        if token == Token.A:
+            return self.away_team_mid_price
+        elif token == Token.B:
+            return self.home_team_mid_price
+        else:
+            raise ValueError(f"Invalid token {token} - must be Token.A or Token.B")
+
+    def get_price(self, token: Token) -> float:
+        """Get price for the given token"""
+        if token == Token.A:
+            return self.away_team_price
+        elif token == Token.B:
+            return self.home_team_price
+        else:
+            raise ValueError(f"Invalid token {token} - must be Token.A or Token.B")
+
+
+class Side(Enum):
+    BUY = BUY
+    SELL = SELL
+
+    @classmethod
+    def _missing_(cls, value):
+        if isinstance(value, str):
+            for side in Side:
+                if value.lower() == side.value.lower():
+                    return side
+        return super()._missing_(value)
+
+
+@typechecked
+class Order:
+    def __init__(
+        self,
+        size: float,
+        price: float,
+        side: Side,
+        token: Token,
+        order_type,
+        id: None | str = None,
+    ):
+        if isinstance(size, int):
+            size = float(size)
+
+        assert isinstance(size, float)
+        assert isinstance(price, float)
+        assert isinstance(side, Side)
+        assert isinstance(token, Token)
+        if id is not None:
+            assert isinstance(id, str)
+
+        self.size = size
+        self.price = price
+        self.side = side
+        self.token = token
+        self.id = id
+        self.order_type = order_type
+
+    def __repr__(self):
+        return f"Order[id={self.id}, price={self.price}, size={self.size}, side={self.side.value}, token={self.token.value}, order_type={self.order_type}]"
+
+
+@typechecked
+@dataclass(frozen=True, slots=True)
+class OrderReset:
+    trigger_timestamp: datetime
+    token: Token
+    size: float
+
+
+@typechecked
+@dataclass(frozen=True, slots=True)
+class ScoreBoard:
+    away_score: int
+    home_score: int
+    game_time: str
+
+    def changed(self, other_score_board: ScoreBoard, threshold: float) -> Token | None:
+        """
+        Compare two score boards and return Token.A if away team scored, Token.B if home team scored,
+        or None if no change or negative change
+        """
+        if not other_score_board:
+            return None
+
+        away_diff = self.away_score - other_score_board.away_score
+        home_diff = self.home_score - other_score_board.home_score
+
+        if away_diff >= threshold:
+            return Token.A
+        elif home_diff >= threshold:
+            return Token.B
+        else:
+            return None
+
+    def get_score(self, token: Token) -> int:
+        """Get score for the given token (A=away, B=home)"""
+        assert isinstance(token, Token)
+        if token == Token.A:
+            return self.away_score
+        elif token == Token.B:
+            return self.home_score
+        else:
+            raise ValueError(f"Invalid token {token} - must be Token.A or Token.B")
+
+
+@typechecked
+@dataclass(frozen=True, slots=True)
+class SportsStrategyState:
+    market_state: MarketState
+    score_board: ScoreBoard

@@ -1,8 +1,7 @@
 from unittest import TestCase
 
 from poly_market_maker.strategies.amm import AMMManager, AMMConfig
-from poly_market_maker.order import Side
-from poly_market_maker.types import Token, Collateral
+from poly_market_maker.types import Token, Collateral, Side
 
 
 class TestAMMManager(TestCase):

@@ -4,34 +4,7 @@ import time
 from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor, wait
 
-from poly_market_maker.order import Order, Side
-from poly_market_maker.types import Token
-
-
-class OwnOrderBook:
-    """Represents the current snapshot of the order book.
-
-    Attributes:
-        -orders: Current list of active orders.
-        -balances: Current balances state.
-        -orders_being_placed: `True` if at least one order is currently being placed. `False` otherwise.
-        -orders_being_cancelled: `True` if at least one orders is currently being cancelled. `False` otherwise.
-    """
-
-    def __init__(
-        self,
-        orders: list[Order],
-        balances: dict,
-        orders_being_placed: bool,
-        orders_being_cancelled: bool,
-    ):
-        assert isinstance(orders_being_placed, bool)
-        assert isinstance(orders_being_cancelled, bool)
-
-        self.orders = orders
-        self.balances = balances
-        self.orders_being_placed = orders_being_placed
-        self.orders_being_cancelled = orders_being_cancelled
+from poly_market_maker.types import Token, OwnOrderBook, Order, Side
 
 
 class OrderManager:
@@ -219,28 +192,6 @@ class OrderManager:
             self._thread_place_order(place_order_function, order)
         )
         wait([result])
-
-    def place_market_order(self, orders: list[Order]):
-        """Places new market orders. Order placement will happen in a background thread.
-
-        Args:
-            new_orders: List of new market orders to place.
-        """
-        assert isinstance(orders, list)
-        assert callable(self.place_order_function)
-
-        with self._lock:
-            self._currently_placing_orders += len(orders)
-
-        self._report_order_book_updated()
-
-        results = [
-            self._executor.submit(
-                self._thread_place_order(self.place_order_function, order)
-            )
-            for order in orders
-        ]
-        wait(results)
 
     def place_orders(self, orders: list[Order]):
         """Places new orders. Order placement will happen in a background thread.

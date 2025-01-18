@@ -92,7 +92,9 @@ class ClobApi:
             )
         return []
 
-    def place_order(self, price: float, size: float, side: str, token_id: int) -> str:
+    def place_order(
+        self, price: float, size: float, side: str, token_id: int, order_type: OrderType
+    ) -> str:
         """
         Places a new order
         """
@@ -101,9 +103,10 @@ class ClobApi:
         )
         start_time = time.time()
         try:
-            resp = self.client.create_and_post_order(
+            order = self.client.create_order(
                 OrderArgs(price=price, size=size, side=side, token_id=token_id)
             )
+            resp = self.client.post_order(order, orderType=order_type)
             clob_requests_latency.labels(
                 method="create_and_post_order", status="ok"
             ).observe((time.time() - start_time))
@@ -146,7 +149,7 @@ class ClobApi:
             )
         return False
 
-    def place_market_order(
+    def place_FOK_order(
         self, price: float, size: float, side: str, token_id: int
     ) -> str:
         self.logger.info(
@@ -154,10 +157,6 @@ class ClobApi:
         )
         start_time = time.time()
         try:
-            order = self.client.create_order(
-                OrderArgs(price=price, size=size, side=side, token_id=token_id)
-            )
-            resp = self.client.post_order(order, orderType=OrderType.FOK)
             clob_requests_latency.labels(
                 method="create_and_post_order", status="ok"
             ).observe((time.time() - start_time))

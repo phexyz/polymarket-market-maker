@@ -1,13 +1,19 @@
 from enum import Enum
-import json
 import logging
 from datetime import datetime
 from dataclasses import dataclass, field
 from typing import List
 
 from poly_market_maker.orderbook import OrderManager
-from poly_market_maker.price_feed import PriceFeed
-from poly_market_maker.types import Token, Collateral, OrderBookEntry, MarketState
+from poly_market_maker.types import (
+    Token,
+    Collateral,
+    OrderBookEntry,
+    MarketState,
+    OwnOrderBook,
+    Market,
+    SportsStrategyState,
+)
 from poly_market_maker.constants import MAX_DECIMALS
 
 from poly_market_maker.strategies.base_strategy import BaseStrategy
@@ -16,7 +22,7 @@ from poly_market_maker.strategies.bands_strategy import BandsStrategy
 from poly_market_maker.strategies.front_run_strategy import FrontRunStrategy
 from poly_market_maker.gamma_api import GammaApi
 from poly_market_maker.clob_api import ClobApi
-from poly_market_maker.orderbook import OwnOrderBook
+from poly_market_maker.scores import ScoreFeed
 
 
 class Strategy(Enum):
@@ -49,21 +55,19 @@ class StrategyManager:
     def __init__(
         self,
         strategy: str,
-        config_path: str,
-        price_feed: PriceFeed,
+        config: dict,
         order_book_manager: OrderManager,
         gamma_api: GammaApi,
         clob_api: ClobApi,
+        market: Market,
     ) -> BaseStrategy:
         self.logger = logging.getLogger(self.__class__.__name__)
 
-        with open(config_path) as fh:
-            config = json.load(fh)
-
-        self.price_feed = price_feed
-        self.order_manager = order_book_manager
-        self.gamma_api = gamma_api
-        self.clob_api = clob_api
+        self.order_manager: OrderManager = order_book_manager
+        self.gamma_api: GammaApi = gamma_api
+        self.clob_api: ClobApi = clob_api
+        self.market: Market = market
+        self.score_feed: ScoreFeed = ScoreFeed(game_id=config.game)
 
         match Strategy(strategy):
             case Strategy.AMM:
@@ -71,35 +75,28 @@ class StrategyManager:
             case Strategy.BANDS:
                 self.strategy = BandsStrategy(config)
             case Strategy.FRONT_RUN:
-                self.strategy = FrontRunStrategy(
-                    config,
-                    gamma_api=self.gamma_api,
-                    clob_api=self.clob_api,
-                )
+                self.strategy = FrontRunStrategy(config)
             case _:
                 raise Exception("Invalid strategy")
 
-    def get_orders(self) -> OwnOrderBook:
-        return self.order_manager.get_order_book()
-
     def get_market_orders(self) -> MarketOrderBook:
-        """Get the full market order book for the current market"""
+        """Get the full market order book for Token 0 for the current market"""
         try:
-            orderbook = self.clob_api.client.get_order_book(
-                self.strategy.market.clobTokenIds[0]
+            token_0_orderbook = self.clob_api.client.get_order_book(
+                self.market.clobTokenIds[0]
             )
-            if not orderbook:
+            if not token_0_orderbook:
                 self.logger.warning("Got empty market order book")
                 return MarketOrderBook.empty()
 
             # Convert to our internal format
             bids = [
                 OrderBookEntry(price=float(bid.price), size=float(bid.size))
-                for bid in orderbook.bids
+                for bid in token_0_orderbook.bids
             ]
             asks = [
                 OrderBookEntry(price=float(ask.price), size=float(ask.size))
-                for ask in orderbook.asks
+                for ask in token_0_orderbook.asks
             ]
 
             # Sort the books
@@ -120,6 +117,11 @@ class StrategyManager:
             self.logger.error(f"Failed to get market orders: {e}")
             return MarketOrderBook.empty()
 
+    def get_token_prices(self):
+        price_a = self.clob_api.get_price(self.market.clobTokenIds[Token.A])
+        price_b = self.clob_api.get_price(self.market.clobTokenIds[Token.B])
+        return {Token.A: price_a, Token.B: price_b}
+
     def get_market_state(self) -> MarketState:
         """Get current market state including orderbook, prices, and derived statistics"""
         try:
@@ -132,24 +134,6 @@ class StrategyManager:
                 self.logger.error("Failed to get order book state")
                 return None
 
-            # Combine market orders with our orders
-            bids = market_book.bids.copy()
-            asks = market_book.asks.copy()
-
-            # Add our orders to the market book
-            for order in own_book.orders:
-                entry = OrderBookEntry(price=order.price, size=order.size)
-                if order.side == "buy":
-                    bids.append(entry)
-                else:
-                    asks.append(entry)
-
-            # Resort after adding our orders
-            if bids:
-                bids.sort(key=lambda x: x.price, reverse=True)
-            if asks:
-                asks.sort(key=lambda x: x.price)
-
             # Get token prices
             try:
                 token_prices = self.get_token_prices()
@@ -160,12 +144,11 @@ class StrategyManager:
             # Create market state object
             market_state = MarketState(
                 timestamp=datetime.now(),
-                market=self.strategy.market,
                 away_team_price=token_prices[Token.A],
                 home_team_price=token_prices[Token.B],
-                away_team_bids=bids,
-                away_team_asks=asks,
-                balances=own_book.balances,
+                away_team_bids=market_book.bids,
+                away_team_asks=market_book.asks,
+                own_orders=own_book,
             )
 
             # Log market state summary
@@ -173,8 +156,10 @@ class StrategyManager:
             self.logger.info(f"Away Team Price: {market_state.away_team_price}")
             self.logger.info(f"Home Team Price: {market_state.home_team_price}")
             self.logger.info(f"Spread: {market_state.spread}")
-            self.logger.info(f"Number of Bids: {len(bids)}")
-            self.logger.info(f"Number of Asks: {len(asks)}")
+            self.logger.info(f"Market Bids: {len(market_state.away_team_bids)}")
+            self.logger.info(f"Market Asks: {len(market_state.away_team_asks)}")
+            self.logger.info(f"Own Orders: {len(market_state.own_orders.orders)}")
+            self.logger.info(f"Own Balances: {market_state.own_orders.balances}")
 
             return market_state
 
@@ -182,23 +167,30 @@ class StrategyManager:
             self.logger.error(f"Error getting market state: {e}")
             return None
 
+    def get_strategy_state(self) -> SportsStrategyState:
+        market_state = self.get_market_state()
+        score_board = self.score_feed.get_scoreboard()
+        if market_state == None or score_board == None:
+            return None
+        return SportsStrategyState(market_state=market_state, score_board=score_board)
+
     def synchronize(self):
         """Synchronize strategy with current market state"""
         self.logger.debug("Synchronizing strategy...")
 
         try:
-            market_state = self.get_market_state()
-            if not market_state:
-                self.logger.error("Failed to get market state")
+            external_state = self.get_strategy_state
+            if not external_state:
+                self.logger.error("Failed to get strategy external state")
                 return
 
-            self.logger.debug(f"Market state: {market_state}")
+            self.logger.debug(f"Strategy state: {external_state}")
 
             # Get orders based on current market state
-            orders_to_cancel, orders_to_place = self.strategy.get_orders(market_state)
+            orders_to_cancel, orders_to_place = self.strategy.get_orders(external_state)
 
-            self.logger.debug(f"Orders to cancel: {len(orders_to_cancel)}")
-            self.logger.debug(f"Orders to place: {len(orders_to_place)}")
+            self.logger.info(f"Orders to cancel: {len(orders_to_cancel)}")
+            self.logger.info(f"Orders to place: {len(orders_to_place)}")
 
             # self.cancel_orders(orders_to_cancel)
             # self.place_orders(orders_to_place)
@@ -206,13 +198,8 @@ class StrategyManager:
         except Exception as e:
             self.logger.error(f"Error in synchronize: {e}")
 
-    def get_token_prices(self):
-        price_a = round(
-            self.price_feed.get_price(Token.A),
-            MAX_DECIMALS,
-        )
-        price_b = round(1 - price_a, MAX_DECIMALS)
-        return {Token.A: price_a, Token.B: price_b}
+    def get_orders(self) -> OwnOrderBook:
+        return self.order_manager.get_order_book()
 
     def cancel_orders(self, orders_to_cancel):
         if len(orders_to_cancel) > 0:

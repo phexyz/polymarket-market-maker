@@ -2,14 +2,15 @@ import logging
 from prometheus_client import start_http_server
 import time
 import csv
+import json
+
+from py_clob_client.clob_types import OrderType
 
 from poly_market_maker.args import get_args
 from poly_market_maker.price_feed import PriceFeedClob
 from poly_market_maker.gas import GasStation, GasStrategy
 from poly_market_maker.utils import setup_logging, setup_web3
-from poly_market_maker.order import Order, Side
-from poly_market_maker.types import Market
-from poly_market_maker.types import Token, Collateral
+from poly_market_maker.types import Token, Collateral, Order, Side
 from poly_market_maker.clob_api import ClobApi
 from poly_market_maker.lifecycle import Lifecycle
 from poly_market_maker.orderbook import OrderManager
@@ -70,19 +71,23 @@ class AppFrontRun:
             lambda order: self.clob_api.cancel_order(order.id)
         )
         self.order_book_manager.place_orders_with(self.place_order)
+
         self.order_book_manager.cancel_all_orders_with(
             lambda _: self.clob_api.cancel_all_orders()
         )
         # self.order_book_manager.clear_all_positions_with(self.clear_all_positions)
         self.order_book_manager.start()
 
+        with open(args.strategy_config) as fh:
+            strategy_config = json.load(fh)
+
         self.strategy_manager = StrategyManager(
             args.strategy,
-            args.strategy_config,
-            self.price_feed,
+            strategy_config,
             self.order_book_manager,
             self.gamma_api,
             self.clob_api,
+            self.market,
         )
 
     """
@@ -94,7 +99,7 @@ class AppFrontRun:
         with Lifecycle() as lifecycle:
             lifecycle.on_startup(self.startup)
             lifecycle.every(self.sync_interval, self.synchronize)  # Sync every 5s
-            # lifecycle.on_shutdown(self.shutdown)
+            lifecycle.on_shutdown(self.shutdown)
 
     """
     lifecycle
@@ -120,7 +125,7 @@ class AppFrontRun:
         """
         self.logger.info("Keeper shutting down...")
         self.order_book_manager.cancel_all_orders()
-        self.order_book_manager.place_market_order
+        self.clear_all_positions_orders()
         self.logger.info("Keeper is shut down!")
 
     """
@@ -194,6 +199,7 @@ class AppFrontRun:
             size=new_order.size,
             side=new_order.side.value,
             token_id=self.market.token_id(new_order.token),
+            order_type=new_order.order_type,
         )
         return Order(
             price=new_order.price,
@@ -201,9 +207,10 @@ class AppFrontRun:
             side=new_order.side,
             id=order_id,
             token=new_order.token,
+            order_type=new_order.order_type,
         )
 
-    def clear_all_positions_orders(self) -> list[Order]:
+    def clear_all_positions_orders(self):
         """
         Clear all positions by placing opposite orders of equal size
         """
@@ -213,28 +220,32 @@ class AppFrontRun:
         orders = []
 
         # For each order, place an opposite order with same size
-        for token, balance in {
-            k: v for k, v in balances.items() if k in [Token.A, Token.B]
-        }.items():
-            # Determine opposite side
-            opposite_side = {
-                Side.BUY: Side.SELL,
-                Side.SELL: Side.BUY,
-            }[token]
+        # Get token balances for A and B
+        token_balances = {k: v for k, v in balances.items() if k in [Token.A, Token.B]}
 
-            # Create and place the opposite order
+        # Find token with larger balance
+        if token_balances[Token.A] > token_balances[Token.B]:
+            larger_token = Token.A
+            balance_diff = token_balances[Token.A] - token_balances[Token.B]
+        else:
+            larger_token = Token.B
+            balance_diff = token_balances[Token.B] - token_balances[Token.A]
+
+        # Only place order if there is a balance difference
+        if balance_diff > 0:
             clearing_order = Order(
-                size=balance,
+                size=balance_diff,
                 price=0.5,
-                side=opposite_side,
-                token=token,
+                side=Side.SELL,
+                token=larger_token,
+                order_type=OrderType.FOK,
             )
 
             self.logger.info(
                 f"clear_all_positions: Placing clearing order: {clearing_order}"
             )
             orders.append(clearing_order)
-        return orders
+        self.order_book_manager.place_orders(orders=orders)
 
     def approve(self):
         """

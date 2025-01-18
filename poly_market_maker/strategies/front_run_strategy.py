@@ -1,208 +1,238 @@
 from dataclasses import dataclass
-from selenium.webdriver.common.by import By
-from selenium.webdriver.support.ui import WebDriverWait
-from selenium import webdriver
-from selenium.webdriver.support import expected_conditions as EC
-from selenium.common.exceptions import TimeoutException, StaleElementReferenceException
+from typing import Optional, Union, List, Dict
 import csv
 import time
 from poly_market_maker.strategies.base_strategy import BaseStrategy
 from poly_market_maker.gamma_api import GammaApi
 from poly_market_maker.clob_api import ClobApi
-from poly_market_maker.types import MarketState, Token
+from poly_market_maker.types import (
+    MarketState,
+    Token,
+    SportsStrategyState,
+    ScoreBoard,
+    Side,
+    OrderReset,
+)
 from poly_market_maker.orderbook import Order
-
-
-@dataclass
-class FrontRunConfig:
-    game_id: str
-    market_id: str
-    poll_interval: float = 0.5  # Default polling interval in seconds
+from datetime import timedelta
+from collections import deque
+from py_clob_client.clob_types import OrderType
 
 
 class FrontRunStrategy(BaseStrategy):
     def __init__(
         self,
-        config_dict: dict,
-        gamma_api: GammaApi,
-        clob_api: ClobApi,
+        config: dict,
     ):
-        assert isinstance(config_dict, dict)
+        assert isinstance(config, dict), "config must be a dictionary"
         print("FrontRunStrategy initialized")
 
         super().__init__()
-        config = self._get_config(config_dict)
-        self.game_id = config.game_id
-        self.market_id = config.market_id
+        self.game_id = config["game_id"]
         self.home_team = "HOME"
         self.away_team = "AWAY"
-        self.poll_interval = config.poll_interval
-
-        self.gamma_api = gamma_api
-        self.clob_api = clob_api
-        self.market = self._get_market()
-
-        # Initialize Chrome WebDriver
-        self.driver = webdriver.Chrome()
-        self.driver.get(f"https://www.espn.com/nba/game/_/gameId/{self.game_id}")
-        self.wait = WebDriverWait(
-            self.driver,
-            timeout=10,
-            poll_frequency=self.poll_interval,
-            ignored_exceptions=(StaleElementReferenceException,),
-        )
+        self.away_token = Token.A
+        self.home_token = Token.B
 
         # Initialize score state
-        self.current_scores = {"home": None, "away": None, "last_update": None}
-
+        self.state: SportsStrategyState = None
+        self.reset: OrderReset = None
+        self.order_size = 1000.0
+        self.reset_delay = 3
         # Initialize CSV file
-        self.csv_filename = f"game_data_{self.game_id}.csv"
+        self.csv_filename = f"game_data_{self.game_id}_updated.csv"
         self._initialize_csv()
 
     def _initialize_csv(self):
-        """Initialize CSV file with headers"""
-        self.header = [
-            "Timestamp",
-            f"{self.away_team}_Score",
-            f"{self.home_team}_Score",
-            f"{self.away_team}_Price",
-            f"{self.home_team}_Price",
-            f"{self.away_team}_Order_Book_Bids",
-            f"{self.away_team}_Order_Book_Asks",
-            "Score_Changed",
-            "Spread",
-            "Mid_Price_Away",
-            "Mid_Price_Home",
-            "Balance_Token_Away",
-            "Balance_Token_B",
-        ]
-
-        # Create file with headers if it doesn't exist
+        """Initialize CSV file"""
+        # Create file if it doesn't exist
         try:
             with open(self.csv_filename, "r"):
                 pass
         except FileNotFoundError:
-            with open(
-                self.csv_filename, mode="w", newline="", encoding="utf-8"
-            ) as file:
-                writer = csv.DictWriter(file, fieldnames=self.header)
-                writer.writeheader()
+            with open(self.csv_filename, "w") as file:
+                pass
 
-    def _get_market(self):
-        """Get market from gamma API using market_id"""
-        if not self.gamma_api:
-            raise ValueError("gamma_api is required but not provided")
+    def save_state_to_csv(self):
+        # Write state as a single line
+        with open(self.csv_filename, "a") as file:
+            file.write(str(self.state) + "\n")
 
-        # Query the market using market_id
-        markets = self.gamma_api.get_markets(querystring_params={"id": self.market_id})
-        if not markets or len(markets) == 0:
+    def _get_favored_token(
+        self, old_state: SportsStrategyState, new_state: SportsStrategyState
+    ) -> Token | None:
+
+        if old_state == None or new_state == None:
             return None
-        market = markets[0]
-        if not market:
-            raise ValueError(f"No market found with ID {self.market_id}")
 
-        return market
+        # handle the case where game has ended
+        if "Final" in new_state.score_board.game_time:
+            if new_state.score_board.away_score > new_state.score_board.home_score:
+                return Token.A
+            else:
+                return Token.B
 
-    @staticmethod
-    def _get_config(config: dict):
-        return FrontRunConfig(
-            game_id=config.get("game_id"),
-            market_id=config.get("market_id"),
-            poll_interval=config.get("poll_interval", 0.5),
+        away_diff = new_state.score_board.away_score - old_state.score_board.away_score
+        home_diff = new_state.score_board.home_score - old_state.score_board.home_score
+
+        # Compare score differences between states
+        old_diff = abs(
+            old_state.score_board.away_score - old_state.score_board.home_score
+        )
+        new_diff = abs(
+            new_state.score_board.away_score - new_state.score_board.home_score
+        )
+        diff_in_diff = abs(new_diff - old_diff)
+        diff_pct = diff_in_diff * 1.0 / old_diff >= 0.3
+
+        print("away_diff:", away_diff)
+        print("home_diff:", home_diff)
+        print("old_diff:", old_diff)
+        print("new_diff:", new_diff)
+        print("diff_in_diff:", diff_in_diff)
+        print("diff_pct:", diff_pct)
+        print("scoreboard:", new_state.score_board)
+
+        if diff_in_diff >= 2 and diff_pct:
+            if away_diff > 0:
+                return Token.A
+            elif home_diff > 0:
+                return Token.B
+
+        return None
+
+    def build_order(
+        self,
+        state: SportsStrategyState,
+        token: Token,
+        side: Side,
+        default_to_FOK: bool = True,
+    ):
+
+        price = state.market_state.get_best_limit_price(token=token, side=side)
+        order_type = OrderType.GTC
+
+        if price == None:
+            if default_to_FOK:
+                order_type = OrderType.FOK
+                price = 0.0 if side == Side.SELL else 1.0
+            else:
+                return None
+
+        return Order(
+            size=self.order_size,
+            price=price,
+            side=side,
+            token=token,
+            order_type=order_type,
         )
 
-    def get_orders(self, market_state: MarketState) -> tuple[list[Order], list[Order]]:
+    def get_orders(
+        self, new_state: SportsStrategyState
+    ) -> tuple[list[Order], list[Order]]:
         """
         Process current market state and collect game data
         Returns: Empty orders since this is a data collection strategy
         """
-        # Get current scores
-        new_scores = self._get_scores()
-        score_changed = self._scores_changed(new_scores)
+        orders_to_place = []
+        orders_to_cancel = []
 
-        # Prepare the row of data to write
-        row = {
-            "Timestamp": market_state.timestamp.strftime("%Y-%m-%d %H:%M:%S"),
-            f"{self.away_team}_Score": new_scores["away"],
-            f"{self.home_team}_Score": new_scores["home"],
-            f"{self.away_team}_Price": market_state.away_team_price,
-            f"{self.home_team}_Price": market_state.home_team_price,
-            f"{self.away_team}_Order_Book_Bids": str(
-                [
-                    {"price": b.price, "size": b.size}
-                    for b in market_state.away_team_bids
-                ]
-            ),
-            f"{self.away_team}_Order_Book_Asks": str(
-                [
-                    {"price": a.price, "size": a.size}
-                    for a in market_state.away_team_asks
-                ]
-            ),
-            "Score_Changed": score_changed,
-            "Spread": market_state.spread,
-            "Mid_Price_Away": market_state.away_team_mid_price,
-            "Mid_Price_Home": market_state.home_team_mid_price,
-            "Balance_Token_Away": market_state.balances[Token.A],
-            "Balance_Token_B": market_state.balances[Token.B],
-        }
+        # check if score changed, then place orders
+        for favored_token in [
+            self._get_favored_token(old_state=self.state, new_state=new_state)
+        ]:
+            print(favored_token)
+            if favored_token == None:
+                continue
+            new_order = self.build_order(
+                state=new_state,
+                token=favored_token,
+                side=Side.BUY,
+                default_to_FOK=False,
+            )
+            print("new_order", new_order)
+            if new_order == None:
+                continue
 
-        # Write to CSV
-        with open(self.csv_filename, mode="a", newline="", encoding="utf-8") as file:
-            writer = csv.DictWriter(file, fieldnames=self.header)
-            writer.writerow(row)
+            orders_to_place.append(new_order)
+            print("in strategy order returned", orders_to_place, orders_to_cancel)
 
-        if score_changed:
-            print(f"\nScore Update at {market_state.timestamp}:")
-            print(f"{self.away_team}: {new_scores['away']}")
-            print(f"{self.home_team}: {new_scores['home']}")
-            print(f"Away Team Price: {market_state.away_team_price}")
-            print(f"Home Team Price: {market_state.home_team_price}")
-            print(f"Spread: {market_state.spread}")
-
-        return [], []
-
-    def _get_scores(self):
-        """Get current scores using WebDriverWait and parse them"""
-        default_scores = {
-            "away": None,
-            "home": None,
-            "timestamp": time.strftime("%Y-%m-%d %H:%M:%S"),
-        }
-        try:
-            # Wait for score elements to be present
-            score_elements = self.wait.until(
-                EC.presence_of_all_elements_located((By.CLASS_NAME, "Gamestrip__Score"))
+            # reset logic
+            reset_from_new_order = OrderReset(
+                trigger_timestamp=new_state.market_state.timestamp
+                + timedelta(seconds=self.reset_delay),
+                token=new_order.token,
+                size=new_order.size,
             )
 
-            if len(score_elements) >= 2:
-                away_score = score_elements[0].text.strip()
-                home_score = score_elements[1].text.strip()
+            if self.reset:
+                # if we had an order unfavored by the new change
+                if self.reset.token != favored_token:
 
-                return {
-                    "away": away_score,
-                    "home": home_score,
-                    "timestamp": time.strftime("%Y-%m-%d %H:%M:%S"),
-                }
-            return default_scores
-        except TimeoutException:
-            return default_scores
+                    orders_to_place_from_reset, orders_to_cancel_from_reset = (
+                        self.consume_reset(self.reset, new_state)
+                    )
+                    orders_to_place.extend(orders_to_place_from_reset)
+                    orders_to_cancel.extend(orders_to_cancel_from_reset)
+                    print(
+                        "in strategy early reset order returned",
+                        orders_to_place,
+                        orders_to_cancel,
+                    )
 
-    def _scores_changed(self, new_scores):
-        """Check if scores have changed"""
-        if not new_scores:
-            return False
+                    self.reset = reset_from_new_order
+                # favored by the new change
+                else:
+                    # increase the size
+                    self.reset = OrderReset(
+                        trigger_timestamp=reset_from_new_order.trigger_timestamp,
+                        token=reset_from_new_order.token,
+                        size=self.reset.size + reset_from_new_order.size,
+                    )
+            else:
+                self.reset = reset_from_new_order
 
-        changed = (
-            new_scores["home"] != self.current_scores["home"]
-            or new_scores["away"] != self.current_scores["away"]
-        )
+        # if there are any existing reset
+        if (
+            self.reset
+            and self.reset.trigger_timestamp <= new_state.market_state.timestamp
+        ):
+            # consume the reset
+            orders_to_place_from_reset, orders_to_cancel_from_reset = (
+                self.consume_reset(self.reset, new_state)
+            )
+            orders_to_place.extend(orders_to_place_from_reset)
+            orders_to_cancel.extend(orders_to_cancel_from_reset)
+            print(
+                "in strategy timed reset order returned",
+                orders_to_place,
+                orders_to_cancel,
+            )
+            self.reset = None
 
-        if changed:
-            self.current_scores = {
-                "home": new_scores["home"],
-                "away": new_scores["away"],
-                "last_update": new_scores["timestamp"],
-            }
+        # Update state
+        self.state = new_state
+        self.save_state_to_csv()
 
-        return changed
+        return orders_to_place, orders_to_cancel
+
+    def consume_reset(self, reset: OrderReset, state: SportsStrategyState):
+        target_token = reset.token
+
+        # consume the reset
+        orders_to_place = [
+            self.build_order(
+                state=state,
+                token=target_token,
+                side=Side.SELL,
+                default_to_FOK=True,
+            )
+        ]
+
+        orders_to_cancel = []
+
+        for active_order in state.market_state.own_orders.orders:
+            if active_order.token == target_token:
+                orders_to_cancel.append(active_order)
+
+        return orders_to_place, orders_to_cancel

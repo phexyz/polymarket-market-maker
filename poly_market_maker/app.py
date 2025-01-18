@@ -6,9 +6,8 @@ from poly_market_maker.args import get_args
 from poly_market_maker.price_feed import PriceFeedClob
 from poly_market_maker.gas import GasStation, GasStrategy
 from poly_market_maker.utils import setup_logging, setup_web3
-from poly_market_maker.order import Order, Side
 from poly_market_maker.market import Market
-from poly_market_maker.types import Token, Collateral
+from poly_market_maker.types import Token, Collateral, Order, Side
 from poly_market_maker.clob_api import ClobApi
 from poly_market_maker.lifecycle import Lifecycle
 from poly_market_maker.orderbook import OrderManager
