@@ -3,7 +3,10 @@ version: 1
 disable_existing_loggers: False
 formatters:
   simple:
-    format: "%(asctime)-15s %(levelname)-4s %(threadName)s %(message)s"
+    format: "%(asctime)-15s %(levelname)-4s-%(filename)s:%(lineno)d %(message)s"
+  detailed:
+    format: "%(asctime)s - %(name)s - %(levelname)s -  - %(message)s"
+    datefmt: "%Y-%m-%d %H:%M:%S"
 
 handlers:
   console:

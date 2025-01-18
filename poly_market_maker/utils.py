@@ -35,7 +35,7 @@ def setup_logging(
         logging.getLogger(__name__).info("Logging configured with config file!")
     else:
         logging.basicConfig(
-            format="%(asctime)-15s %(levelname)-4s %(threadName)s %(message)s",
+            format="%(asctime)-15s %(levelname)-4s-%(threadName)s-%(filename)s:%(lineno)d %(message)s",
             level=log_level,
         )
         logging.getLogger(__name__).info("Logging configured with default attributes!")

@@ -3,7 +3,6 @@ from prometheus_client import start_http_server
 import time
 
 from poly_market_maker.args import get_args
-from poly_market_maker.price_feed import PriceFeedClob
 from poly_market_maker.gas import GasStation, GasStrategy
 from poly_market_maker.utils import setup_logging, setup_web3
 from poly_market_maker.market import Market

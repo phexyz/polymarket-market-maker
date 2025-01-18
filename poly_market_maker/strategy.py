@@ -67,7 +67,7 @@ class StrategyManager:
         self.gamma_api: GammaApi = gamma_api
         self.clob_api: ClobApi = clob_api
         self.market: Market = market
-        self.score_feed: ScoreFeed = ScoreFeed(game_id=config.game)
+        self.score_feed: ScoreFeed = ScoreFeed(game_id=config["game_id"])
 
         match Strategy(strategy):
             case Strategy.AMM:
@@ -118,8 +118,8 @@ class StrategyManager:
             return MarketOrderBook.empty()
 
     def get_token_prices(self):
-        price_a = self.clob_api.get_price(self.market.clobTokenIds[Token.A])
-        price_b = self.clob_api.get_price(self.market.clobTokenIds[Token.B])
+        price_a = self.clob_api.get_price(self.market.token_id(Token.A))
+        price_b = self.clob_api.get_price(self.market.token_id(Token.B))
         return {Token.A: price_a, Token.B: price_b}
 
     def get_market_state(self) -> MarketState:
@@ -151,16 +151,6 @@ class StrategyManager:
                 own_orders=own_book,
             )
 
-            # Log market state summary
-            self.logger.info(f"Market State Summary:")
-            self.logger.info(f"Away Team Price: {market_state.away_team_price}")
-            self.logger.info(f"Home Team Price: {market_state.home_team_price}")
-            self.logger.info(f"Spread: {market_state.spread}")
-            self.logger.info(f"Market Bids: {len(market_state.away_team_bids)}")
-            self.logger.info(f"Market Asks: {len(market_state.away_team_asks)}")
-            self.logger.info(f"Own Orders: {len(market_state.own_orders.orders)}")
-            self.logger.info(f"Own Balances: {market_state.own_orders.balances}")
-
             return market_state
 
         except Exception as e:
@@ -179,12 +169,10 @@ class StrategyManager:
         self.logger.debug("Synchronizing strategy...")
 
         try:
-            external_state = self.get_strategy_state
+            external_state = self.get_strategy_state()
             if not external_state:
                 self.logger.error("Failed to get strategy external state")
                 return
-
-            self.logger.debug(f"Strategy state: {external_state}")
 
             # Get orders based on current market state
             orders_to_cancel, orders_to_place = self.strategy.get_orders(external_state)

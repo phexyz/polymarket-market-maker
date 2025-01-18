@@ -173,7 +173,7 @@ class Market(BaseModel):
     startDateIso: Optional[str] = None
     hasReviewedDates: Optional[bool] = None
     volume24hr: Optional[float] = None
-    clobTokenIds: Optional[list] = None
+    clobTokenIds: Optional[List[int]] = None
     umaBond: Optional[int] = None  # returned as string from api?
     umaReward: Optional[int] = None  # returned as string from api?
     volume24hrClob: Optional[float] = None
@@ -298,7 +298,7 @@ class OrderBookEntry:
 
 
 @typechecked
-@dataclass(slots=True)
+@dataclass
 class MarketState:
     """Container for all market state information at a point in time"""
 
@@ -315,11 +315,20 @@ class MarketState:
     # Our own orders and balances
     own_orders: OwnOrderBook
 
+    orders_to_place = None
+    orders_to_cancel = None
+
     # Market summary stats
     away_team_mid_price: float = None
     home_team_mid_price: float = None
     spread: float = None
     volume_24h: float = None
+
+    def set_orders_to_place(self, orders: list[Order]):
+        self.orders_to_place = orders
+
+    def set_orders_to_cancel(self, orders: list[Order]):
+        self.orders_to_cancel = orders
 
     def __post_init__(self):
         """Calculate derived statistics"""

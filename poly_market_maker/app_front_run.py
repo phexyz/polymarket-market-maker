@@ -7,7 +7,6 @@ import json
 from py_clob_client.clob_types import OrderType
 
 from poly_market_maker.args import get_args
-from poly_market_maker.price_feed import PriceFeedClob
 from poly_market_maker.gas import GasStation, GasStrategy
 from poly_market_maker.utils import setup_logging, setup_web3
 from poly_market_maker.types import Token, Collateral, Order, Side
@@ -62,8 +61,6 @@ class AppFrontRun:
             querystring_params={"id": args.market_id}
         )[0]
 
-        self.price_feed = PriceFeedClob(self.market, self.clob_api)
-
         self.order_book_manager = OrderManager(args.refresh_frequency, max_workers=1)
         self.order_book_manager.get_orders_with(self.get_orders)
         self.order_book_manager.get_balances_with(self.get_balances)
@@ -80,6 +77,7 @@ class AppFrontRun:
 
         with open(args.strategy_config) as fh:
             strategy_config = json.load(fh)
+        self.logger.info(f"Strategy config: {strategy_config}")
 
         self.strategy_manager = StrategyManager(
             args.strategy,

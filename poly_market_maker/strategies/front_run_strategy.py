@@ -56,6 +56,8 @@ class FrontRunStrategy(BaseStrategy):
     def save_state_to_csv(self):
         # Write state as a single line
         with open(self.csv_filename, "a") as file:
+            # Log state before saving to CSV
+            self.logger.info(f"Saving state to CSV: {self.csv_filename}")
             file.write(str(self.state) + "\n")
 
     def _get_favored_token(
@@ -83,17 +85,9 @@ class FrontRunStrategy(BaseStrategy):
             new_state.score_board.away_score - new_state.score_board.home_score
         )
         diff_in_diff = abs(new_diff - old_diff)
-        diff_pct = diff_in_diff * 1.0 / old_diff >= 0.3
+        diff_pct = diff_in_diff * 1.0 / old_diff if old_diff > 0 else 1
 
-        print("away_diff:", away_diff)
-        print("home_diff:", home_diff)
-        print("old_diff:", old_diff)
-        print("new_diff:", new_diff)
-        print("diff_in_diff:", diff_in_diff)
-        print("diff_pct:", diff_pct)
-        print("scoreboard:", new_state.score_board)
-
-        if diff_in_diff >= 2 and diff_pct:
+        if diff_in_diff >= 2 and diff_pct >= 0.3:
             if away_diff > 0:
                 return Token.A
             elif home_diff > 0:
@@ -141,7 +135,9 @@ class FrontRunStrategy(BaseStrategy):
         for favored_token in [
             self._get_favored_token(old_state=self.state, new_state=new_state)
         ]:
-            print(favored_token)
+            self.logger.info(
+                f"Favored token: {favored_token.value if favored_token else None}"
+            )
             if favored_token == None:
                 continue
             new_order = self.build_order(
@@ -150,12 +146,13 @@ class FrontRunStrategy(BaseStrategy):
                 side=Side.BUY,
                 default_to_FOK=False,
             )
-            print("new_order", new_order)
             if new_order == None:
                 continue
 
             orders_to_place.append(new_order)
-            print("in strategy order returned", orders_to_place, orders_to_cancel)
+            self.logger.info(
+                f"Strategy order returned - Orders to place: {orders_to_place}, Orders to cancel: {orders_to_cancel}"
+            )
 
             # reset logic
             reset_from_new_order = OrderReset(
@@ -174,10 +171,8 @@ class FrontRunStrategy(BaseStrategy):
                     )
                     orders_to_place.extend(orders_to_place_from_reset)
                     orders_to_cancel.extend(orders_to_cancel_from_reset)
-                    print(
-                        "in strategy early reset order returned",
-                        orders_to_place,
-                        orders_to_cancel,
+                    self.logger.info(
+                        f"Early reset order returned - Orders to place: {orders_to_place}, Orders to cancel: {orders_to_cancel}"
                     )
 
                     self.reset = reset_from_new_order
@@ -192,26 +187,39 @@ class FrontRunStrategy(BaseStrategy):
             else:
                 self.reset = reset_from_new_order
 
+        # Log reset processing status
+        if self.reset:
+            self.logger.info(
+                f"Processing reset: token={self.reset.token.value}, "
+                f"size={self.reset.size}, "
+                f"trigger_time={self.reset.trigger_timestamp}"
+            )
+        else:
+            self.logger.info("No reset to process")
+
         # if there are any existing reset
         if (
             self.reset
             and self.reset.trigger_timestamp <= new_state.market_state.timestamp
         ):
+            self.logger.info(
+                f"Reset triggered at {new_state.market_state.timestamp} for token {self.reset.token.value} with size {self.reset.size}"
+            )
             # consume the reset
             orders_to_place_from_reset, orders_to_cancel_from_reset = (
                 self.consume_reset(self.reset, new_state)
             )
             orders_to_place.extend(orders_to_place_from_reset)
             orders_to_cancel.extend(orders_to_cancel_from_reset)
-            print(
-                "in strategy timed reset order returned",
-                orders_to_place,
-                orders_to_cancel,
+            self.logger.info(
+                f"Timed reset order returned - Orders to place: {orders_to_place}, Orders to cancel: {orders_to_cancel}"
             )
             self.reset = None
 
         # Update state
         self.state = new_state
+        self.state.market_state.set_orders_to_place(orders_to_place)
+        self.state.market_state.set_orders_to_cancel(orders_to_cancel)
         self.save_state_to_csv()
 
         return orders_to_place, orders_to_cancel
