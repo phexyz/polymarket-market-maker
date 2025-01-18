@@ -73,6 +73,7 @@ class Contracts:
             chain_requests_counter.labels(method="allowance", status="error").inc()
             raise e
 
+        self.logger.info(f"ERC20 allowance: {allowance}")
         return allowance > 0
 
     def is_approved_erc1155(self, token: str, owner: str, spender: str):
@@ -88,6 +89,7 @@ class Contracts:
             ).inc()
             raise e
 
+        self.logger.debug(f"ERC1155 allowance: {approved}")
         return approved
 
     def max_approve_erc20(self, token: str, owner: str, spender: str):

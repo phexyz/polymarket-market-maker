@@ -59,3 +59,15 @@ Every `sync_interval` (the default is 30s), the strategies do the following:
 6. Place new orders.
 
 When the app receives a SIGTERM, all orders are cancelled and the app exits gracefully.
+
+TODO:
+
+1. how to clear a position
+1. simulate the strategy
+1. strategy stop loss and time up sale. try to use market order
+1. scores fluctuate backwards sometimes
+1. handle the game ending case, the score will be
+1. 1 point scoring does not trigger an execute
+1. need to have current game time. if have less than x seconds, only if the scores are within these many points do trades trigger. a good metrics is to calculate the change as a percentage of the difference between the scores of the two teams. if they are 10 points apart, 3 points chnage will bring to 30% change. very significant. only look at changes of a certain percentage above. in 4th quarter only look at percentage change that is greater than 30%. in 3 10%. dont look at one point change
+1. have a game over flag
+1. why does the thread number keep increasing?

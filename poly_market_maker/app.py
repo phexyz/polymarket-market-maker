@@ -11,7 +11,7 @@ from poly_market_maker.market import Market
 from poly_market_maker.types import Token, Collateral
 from poly_market_maker.clob_api import ClobApi
 from poly_market_maker.lifecycle import Lifecycle
-from poly_market_maker.orderbook import OrderBookManager
+from poly_market_maker.orderbook import OrderManager
 from poly_market_maker.contracts import Contracts
 from poly_market_maker.metrics import keeper_balance_amount
 from poly_market_maker.strategy import StrategyManager
@@ -58,9 +58,7 @@ class App:
 
         self.price_feed = PriceFeedClob(self.market, self.clob_api)
 
-        self.order_book_manager = OrderBookManager(
-            args.refresh_frequency, max_workers=1
-        )
+        self.order_book_manager = OrderManager(args.refresh_frequency, max_workers=1)
         self.order_book_manager.get_orders_with(self.get_orders)
         self.order_book_manager.get_balances_with(self.get_balances)
         self.order_book_manager.cancel_orders_with(

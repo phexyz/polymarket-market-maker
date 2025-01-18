@@ -3,6 +3,7 @@ import sys
 import time
 from py_clob_client.client import ClobClient, ApiCreds, OrderArgs, OpenOrderParams
 from py_clob_client.exceptions import PolyApiException
+from py_clob_client.clob_types import OrderType
 
 from poly_market_maker.utils import randomize_default_price
 from poly_market_maker.constants import OK
@@ -67,14 +68,7 @@ class ClobApi:
                 (time.time() - start_time)
             )
 
-        return self._rand_price()
-
-    def _rand_price(self) -> float:
-        price = randomize_default_price(DEFAULT_PRICE)
-        self.logger.info(
-            f"Could not fetch price from CLOB API, returning random price: {price}"
-        )
-        return price
+        return None
 
     def get_orders(self, condition_id: str):
         """
@@ -151,6 +145,40 @@ class ClobApi:
                 (time.time() - start_time)
             )
         return False
+
+    def place_market_order(
+        self, price: float, size: float, side: str, token_id: int
+    ) -> str:
+        self.logger.info(
+            f"Placing a new market order: Order[price={price},size={size},side={side},token_id={token_id}]"
+        )
+        start_time = time.time()
+        try:
+            order = self.client.create_order(
+                OrderArgs(price=price, size=size, side=side, token_id=token_id)
+            )
+            resp = self.client.post_order(order, orderType=OrderType.FOK)
+            clob_requests_latency.labels(
+                method="create_and_post_order", status="ok"
+            ).observe((time.time() - start_time))
+            order_id = None
+            if resp and resp.get("success") and resp.get("orderID"):
+                order_id = resp.get("orderID")
+                self.logger.info(
+                    f"Succesfully placed new order: Order[id={order_id},price={price},size={size},side={side},tokenID={token_id}]!"
+                )
+                return order_id
+
+            err_msg = resp.get("errorMsg")
+            self.logger.error(
+                f"Could not place new order! CLOB returned error: {err_msg}"
+            )
+        except Exception as e:
+            self.logger.error(f"Request exception: failed placing new order: {e}")
+            clob_requests_latency.labels(
+                method="create_and_post_order", status="error"
+            ).observe((time.time() - start_time))
+        return None
 
     def cancel_all_orders(self) -> bool:
         self.logger.info("Cancelling all open keeper orders..")

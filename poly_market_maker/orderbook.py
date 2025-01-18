@@ -5,9 +5,10 @@ from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor, wait
 
 from poly_market_maker.order import Order, Side
+from poly_market_maker.types import Token
 
 
-class OrderBook:
+class OwnOrderBook:
     """Represents the current snapshot of the order book.
 
     Attributes:
@@ -33,7 +34,7 @@ class OrderBook:
         self.orders_being_cancelled = orders_being_cancelled
 
 
-class OrderBookManager:
+class OrderManager:
     """Tracks state of the order book without constantly querying it.
 
     Attributes:
@@ -94,6 +95,11 @@ class OrderBookManager:
 
         self.place_order_function = place_order_function
 
+    def clear_all_positions_with(self, clear_all_positions_function: Callable):
+        assert callable(clear_all_positions_function)
+
+        self.clear_all_positions_function = clear_all_positions_function
+
     def cancel_orders_with(self, cancel_order_function: Callable):
         """
         Configures the function used to cancel orders.
@@ -123,7 +129,7 @@ class OrderBookManager:
         """Start the background refresh of active keeper orders."""
         threading.Thread(target=self._thread_refresh_order_book, daemon=True).start()
 
-    def get_order_book(self) -> OrderBook:
+    def get_order_book(self) -> OwnOrderBook:
         """
         Returns the current snapshot of the active keeper orders and balances.
         """
@@ -132,11 +138,18 @@ class OrderBookManager:
             time.sleep(0.5)
 
         with self._lock:
-            self.logger.debug("Getting the order book...")
-            if self._state.get("orders") is not None:
+            self.logger.debug(f"Getting the order book... State: {self._state}")
+
+            # Safely get orders from state
+            current_orders = self._state.get("orders", [])
+            if current_orders is not None:
                 self.logger.debug(
-                    f"Orders retrieved last time: {[order.id for order in self._state['orders']]}"
+                    f"Orders retrieved last time: {[order.id for order in current_orders]}"
                 )
+            else:
+                current_orders = []
+                self.logger.debug("No orders in current state")
+
             self.logger.debug(
                 f"Orders placed since then: {[order.id for order in self._orders_placed]}"
             )
@@ -153,28 +166,38 @@ class OrderBookManager:
             orders = []
 
             # Add orders which have been placed if they exist
-            if self._state.get("orders") is not None:
-                orders = list(self._state["orders"])
-                for order in self._orders_placed:
-                    if order.id not in list(map(lambda order: order.id, orders)):
-                        orders.append(order)
+            orders = list(current_orders)
+            for order in self._orders_placed:
+                if order.id not in list(map(lambda order: order.id, orders)):
+                    orders.append(order)
 
-                # Remove orders being cancelled and already cancelled.
-                orders = list(
-                    filter(
-                        lambda order: order.id not in self._order_ids_cancelling
-                        and order.id not in self._order_ids_cancelled,
-                        orders,
-                    )
+            # Remove orders being cancelled and already cancelled
+            orders = list(
+                filter(
+                    lambda order: order.id not in self._order_ids_cancelling
+                    and order.id not in self._order_ids_cancelled,
+                    orders,
                 )
+            )
 
-                self.logger.debug(
-                    f"Open keeper orders: {[order.id for order in orders]}"
-                )
+            self.logger.debug(f"Open keeper orders: {[order.id for order in orders]}")
 
-        return OrderBook(
+            # Safely get balances from state with default empty dict
+            balances = self._state.get("balances", {})
+            if balances is None:
+                balances = {}
+                self.logger.debug("No balances in current state, using empty dict")
+
+            # Ensure all required token balances exist with defaults
+            default_balances = {Token.A: 0, Token.B: 0, Token.C: 0}
+            for token, default in default_balances.items():
+                if token not in balances or balances[token] is None:
+                    balances[token] = default
+                    self.logger.debug(f"Using default balance 0 for {token}")
+
+        return OwnOrderBook(
             orders=orders,
-            balances=self._state["balances"],
+            balances=balances,
             orders_being_placed=self._currently_placing_orders > 0,
             orders_being_cancelled=len(self._order_ids_cancelling) > 0,
         )
@@ -196,6 +219,28 @@ class OrderBookManager:
             self._thread_place_order(place_order_function, order)
         )
         wait([result])
+
+    def place_market_order(self, orders: list[Order]):
+        """Places new market orders. Order placement will happen in a background thread.
+
+        Args:
+            new_orders: List of new market orders to place.
+        """
+        assert isinstance(orders, list)
+        assert callable(self.place_order_function)
+
+        with self._lock:
+            self._currently_placing_orders += len(orders)
+
+        self._report_order_book_updated()
+
+        results = [
+            self._executor.submit(
+                self._thread_place_order(self.place_order_function, order)
+            )
+            for order in orders
+        ]
+        wait(results)
 
     def place_orders(self, orders: list[Order]):
         """Places new orders. Order placement will happen in a background thread.

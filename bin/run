@@ -19,5 +19,6 @@ exec python3 -m poly_market_maker \
     --rpc-url "$RPC_URL" \
     --clob-api-url "$CLOB_API_URL" \
     --condition-id "$CONDITION_ID" \
+    --market-id "$MARKET_ID" \
     --strategy "$STRATEGY" \
     --strategy-config "$CONFIG"

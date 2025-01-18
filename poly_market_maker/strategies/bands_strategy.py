@@ -1,6 +1,6 @@
 from poly_market_maker.types import Token, Collateral
 from poly_market_maker.order import Order, Side
-from poly_market_maker.orderbook import OrderBook
+from poly_market_maker.orderbook import OwnOrderBook
 
 from poly_market_maker.strategies.bands import Bands
 from poly_market_maker.strategies.base_strategy import BaseStrategy
@@ -21,7 +21,7 @@ class BandsStrategy(BaseStrategy):
                 f"Config is invalid ({e}). Treating the config as if it has no bands."
             )
 
-    def get_orders(self, orderbook: OrderBook, target_prices):
+    def get_orders(self, orderbook: OwnOrderBook, target_prices):
         """
         Synchronize the orderbook by cancelling orders out of bands and placing new orders if necessary
         """

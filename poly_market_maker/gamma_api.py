@@ -6,7 +6,7 @@ from datetime import datetime, timedelta
 import re
 
 
-class GammaMarketClient:
+class GammaApi:
     def __init__(self):
         self.gamma_url = "https://gamma-api.polymarket.com"
         self.gamma_markets_endpoint = self.gamma_url + "/markets"
@@ -70,7 +70,7 @@ class GammaMarketClient:
             print(f"[parse_event] Caught exception: {err}")
 
     def get_markets(
-        self, querystring_params={}, parse_pydantic=False, local_file_path=None
+        self, querystring_params={}, parse_pydantic=True, local_file_path=None
     ) -> "list[Market]":
         if parse_pydantic and local_file_path is not None:
             raise Exception(
@@ -221,7 +221,7 @@ class GammaMarketClient:
                 )
                 event_time = datetime.strptime(start_time_str, "%B %d %I:%M%p %Y")
                 # Check if event is on the target date and after the current time
-                return event_time.date() == current_date and event_time <= current_time
+                return event_time.date() == current_date
             return False
 
         # Use filter to find valid events

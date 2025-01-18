@@ -8,15 +8,15 @@ from poly_market_maker.price_feed import PriceFeedClob
 from poly_market_maker.gas import GasStation, GasStrategy
 from poly_market_maker.utils import setup_logging, setup_web3
 from poly_market_maker.order import Order, Side
-from poly_market_maker.market import Market
+from poly_market_maker.types import Market
 from poly_market_maker.types import Token, Collateral
 from poly_market_maker.clob_api import ClobApi
 from poly_market_maker.lifecycle import Lifecycle
-from poly_market_maker.orderbook import OrderBookManager
+from poly_market_maker.orderbook import OrderManager
 from poly_market_maker.contracts import Contracts
 from poly_market_maker.metrics import keeper_balance_amount
 from poly_market_maker.strategy import StrategyManager
-from poly_market_maker.gamma_api import GammaMarketClient
+from poly_market_maker.gamma_api import GammaApi
 
 from selenium import webdriver
 from selenium.webdriver.common.by import By
@@ -30,7 +30,7 @@ class AppFrontRun:
         self.logger = logging.getLogger(__name__)
 
         args = get_args(args)
-        self.sync_interval = args.sync_interval
+        self.sync_interval = 0.5
 
         # self.min_tick = args.min_tick
         # self.min_size = args.min_size
@@ -47,6 +47,7 @@ class AppFrontRun:
             chain_id=self.web3.eth.chain_id,
             private_key=args.private_key,
         )
+        self.gamma_api = GammaApi()
 
         self.gas_station = GasStation(
             strat=GasStrategy(args.gas_strategy),
@@ -56,16 +57,13 @@ class AppFrontRun:
         )
         self.contracts = Contracts(self.web3, self.gas_station)
 
-        self.market = Market(
-            args.condition_id,
-            self.clob_api.get_collateral_address(),
-        )
+        self.market = self.gamma_api.get_markets(
+            querystring_params={"id": args.market_id}
+        )[0]
 
         self.price_feed = PriceFeedClob(self.market, self.clob_api)
 
-        self.order_book_manager = OrderBookManager(
-            args.refresh_frequency, max_workers=1
-        )
+        self.order_book_manager = OrderManager(args.refresh_frequency, max_workers=1)
         self.order_book_manager.get_orders_with(self.get_orders)
         self.order_book_manager.get_balances_with(self.get_balances)
         self.order_book_manager.cancel_orders_with(
@@ -75,97 +73,28 @@ class AppFrontRun:
         self.order_book_manager.cancel_all_orders_with(
             lambda _: self.clob_api.cancel_all_orders()
         )
+        # self.order_book_manager.clear_all_positions_with(self.clear_all_positions)
         self.order_book_manager.start()
 
-        # Initialize the WebDriver
-        self.game_id = "401705126"
-        self.driver = webdriver.Chrome()
-        self.driver.get(f"https://www.espn.com/nba/game/_/gameId/{self.game_id}")
-
-        self.gamma_api = GammaMarketClient()
-        # self.active_markets = self.clob_api.get_current_nba_markets()
-        self.active_markets = [
-            mkt
-            for mkt in self.gamma_api.get_current_nba_markets()
-            if mkt.slug == "nba-bkn-por-2025-01-14"
-        ]
+        self.strategy_manager = StrategyManager(
+            args.strategy,
+            args.strategy_config,
+            self.price_feed,
+            self.order_book_manager,
+            self.gamma_api,
+            self.clob_api,
+        )
 
     """
     main
     """
 
     def main(self):
-        # Define the CSV filename
-        csv_filename = f"game_data_{self.game_id}.csv"
-
-        # Define the header for the CSV file
-        header = [
-            "Timestamp",
-            "Scores",
-            "Market",
-            "Price0",
-            "Price1",
-            "Order Book Bids",
-            "Order Book Asks",
-        ]
-
-        # Check if the CSV file already exists to avoid rewriting the header
-        file_exists = False
-        try:
-            with open(csv_filename, "r"):
-                file_exists = True
-        except FileNotFoundError:
-            pass
-
-        # Open the CSV file in append mode
-        with open(csv_filename, mode="a", newline="", encoding="utf-8") as file:
-            writer = csv.DictWriter(file, fieldnames=header)
-
-            # Write the header if the file doesn't already exist
-            if not file_exists:
-                writer.writeheader()
-
-            prev_scores_dict = {}
-
-            # Continuous data collection
-            while True:
-                # Collect scores
-                scores = self.driver.find_elements(By.CLASS_NAME, "Gamestrip__Score")
-                scores_dict = {
-                    f"Score {idx + 1}": score.text for idx, score in enumerate(scores)
-                }
-                if scores_dict == prev_scores_dict:
-                    continue
-                prev_scores_dict = scores_dict
-
-                # Iterate over active markets and log data
-                for mkt in self.active_markets:
-                    price0 = self.clob_api.get_price(mkt.clobTokenIds[0])
-                    price1 = self.clob_api.get_price(mkt.clobTokenIds[1])
-                    orderBook = self.clob_api.client.get_order_book(mkt.clobTokenIds[0])
-
-                    # Format bids and asks as strings
-                    bids = [
-                        {"price": bid.price, "size": bid.size} for bid in orderBook.bids
-                    ]
-                    asks = [
-                        {"price": ask.price, "size": ask.size} for ask in orderBook.asks
-                    ]
-
-                    # Prepare the row of data to write
-                    row = {
-                        "Timestamp": time.strftime("%Y-%m-%d %H:%M:%S"),
-                        "Scores": str(scores_dict),
-                        "Market": mkt.slug,
-                        "Price0": price0,
-                        "Price1": price1,
-                        "Order Book Bids": str(bids),
-                        "Order Book Asks": str(asks),
-                    }
-                    writer.writerow(row)
-
-                # Wait 0.5 seconds before the next iteration
-                time.sleep(0.5)
+        self.logger.debug(self.sync_interval)
+        with Lifecycle() as lifecycle:
+            lifecycle.on_startup(self.startup)
+            lifecycle.every(self.sync_interval, self.synchronize)  # Sync every 5s
+            # lifecycle.on_shutdown(self.shutdown)
 
     """
     lifecycle
@@ -182,7 +111,7 @@ class AppFrontRun:
         Synchronize the orderbook by cancelling orders out of bands and placing new orders if necessary
         """
         self.logger.debug("Synchronizing ...")
-
+        self.strategy_manager.synchronize()
         self.logger.debug("Synchronized !")
 
     def shutdown(self):
@@ -191,6 +120,7 @@ class AppFrontRun:
         """
         self.logger.info("Keeper shutting down...")
         self.order_book_manager.cancel_all_orders()
+        self.order_book_manager.place_market_order
         self.logger.info("Keeper is shut down!")
 
     """
@@ -273,6 +203,39 @@ class AppFrontRun:
             token=new_order.token,
         )
 
+    def clear_all_positions_orders(self) -> list[Order]:
+        """
+        Clear all positions by placing opposite orders of equal size
+        """
+        # Get all current open orders
+        balances = self.get_balances()
+        self.logger.debug(f"clear_all_positions: Balances: {balances}")
+        orders = []
+
+        # For each order, place an opposite order with same size
+        for token, balance in {
+            k: v for k, v in balances.items() if k in [Token.A, Token.B]
+        }.items():
+            # Determine opposite side
+            opposite_side = {
+                Side.BUY: Side.SELL,
+                Side.SELL: Side.BUY,
+            }[token]
+
+            # Create and place the opposite order
+            clearing_order = Order(
+                size=balance,
+                price=0.5,
+                side=opposite_side,
+                token=token,
+            )
+
+            self.logger.info(
+                f"clear_all_positions: Placing clearing order: {clearing_order}"
+            )
+            orders.append(clearing_order)
+        return orders
+
     def approve(self):
         """
         Approve the keeper on the collateral and conditional tokens
@@ -282,4 +245,6 @@ class AppFrontRun:
         exchange = self.clob_api.get_exchange()
 
         self.contracts.max_approve_erc20(collateral, self.address, exchange)
+        self.logger.debug(f"Approved ERC20 for {exchange}")
         self.contracts.max_approve_erc1155(conditional, self.address, exchange)
+        self.logger.debug(f"Approved ERC1155 for {exchange}")

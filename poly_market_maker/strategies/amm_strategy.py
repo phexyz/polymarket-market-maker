@@ -1,4 +1,4 @@
-from poly_market_maker.orderbook import OrderBook
+from poly_market_maker.orderbook import OwnOrderBook
 from poly_market_maker.constants import MIN_SIZE
 from poly_market_maker.order import Order
 
@@ -49,7 +49,7 @@ class AMMStrategy(BaseStrategy):
             max_collateral=config.get("max_collateral"),
         )
 
-    def get_orders(self, orderbook: OrderBook, target_prices):
+    def get_orders(self, orderbook: OwnOrderBook, target_prices):
         orders_to_cancel = []
         orders_to_place = []
 

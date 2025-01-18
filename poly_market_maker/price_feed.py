@@ -2,7 +2,7 @@ from enum import Enum
 import logging
 
 from poly_market_maker.clob_api import ClobApi
-from poly_market_maker.market import Market
+from poly_market_maker.types import Market
 from poly_market_maker.types import Token
 
 

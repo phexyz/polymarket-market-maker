@@ -1,7 +1,9 @@
 from __future__ import annotations
-from typing import Optional, Union
+from typing import Optional, Union, List, Dict
 from pydantic import BaseModel
 from enum import Enum
+from dataclasses import dataclass
+from datetime import datetime
 
 
 class Trade(BaseModel):
@@ -105,7 +107,7 @@ class PolymarketEvent(BaseModel):
 class Market(BaseModel):
     id: int
     question: Optional[str] = None
-    conditionId: Optional[str] = None
+    condition_id: Optional[str] = None
     slug: Optional[str] = None
     resolutionSource: Optional[str] = None
     endDate: Optional[str] = None
@@ -167,6 +169,22 @@ class Market(BaseModel):
     )
     rewardsMaxSpread: Optional[float] = None
     spread: Optional[float] = None
+
+    def __repr__(self):
+        return f"Market[id={self.id}, condition_id={self.condition_id}, question={self.question}]"
+
+    def token_id(self, token: Token) -> int:
+        if not self.clobTokenIds:
+            raise ValueError("No CLOB token IDs available")
+        return self.clobTokenIds[token.value]
+
+    def token(self, token_id: int) -> Token:
+        if not self.clobTokenIds:
+            raise ValueError("No CLOB token IDs available")
+        for token in Token:
+            if token_id == self.clobTokenIds[token.value]:
+                return token
+        raise ValueError("Unrecognized token ID")
 
 
 class ComplexMarket(BaseModel):
@@ -233,8 +251,49 @@ Collateral = "Collateral"
 
 
 class Token(Enum):
-    A = "TokenA"
-    B = "TokenB"
+    A = 0
+    B = 1
+    C = 2
 
     def complement(self):
         return Token.B if self == Token.A else Token.A
+
+
+@dataclass
+class OrderBookEntry:
+    price: float
+    size: float
+
+
+@dataclass
+class MarketState:
+    """Container for all market state information at a point in time"""
+
+    timestamp: datetime
+    market: Market
+
+    # Token prices
+    away_team_price: float
+    home_team_price: float
+
+    # Order book summary
+    away_team_bids: List[OrderBookEntry]
+    away_team_asks: List[OrderBookEntry]
+
+    # Balances
+    balances: Dict[Token, float]
+
+    # Market summary stats
+    away_team_mid_price: float = None
+    home_team_mid_price: float = None
+    spread: float = None
+    volume_24h: float = None
+
+    def __post_init__(self):
+        """Calculate derived statistics"""
+        if self.away_team_bids and self.away_team_asks:
+            best_bid = max(bid.price for bid in self.away_team_bids)
+            best_ask = min(ask.price for ask in self.away_team_asks)
+            self.away_team_mid_price = (best_bid + best_ask) / 2
+            self.home_team_mid_price = 1 - self.away_team_mid_price
+            self.spread = best_ask - best_bid
