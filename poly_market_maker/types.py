@@ -9,6 +9,8 @@ from typeguard import typechecked
 from py_clob_client.clob_types import OrderType
 
 
+@typechecked
+@dataclass
 class OwnOrderBook:
     """Represents the current snapshot of the order book.
 
@@ -19,20 +21,10 @@ class OwnOrderBook:
         -orders_being_cancelled: `True` if at least one orders is currently being cancelled. `False` otherwise.
     """
 
-    def __init__(
-        self,
-        orders: list[Order],
-        balances: dict,
-        orders_being_placed: bool,
-        orders_being_cancelled: bool,
-    ):
-        assert isinstance(orders_being_placed, bool)
-        assert isinstance(orders_being_cancelled, bool)
-
-        self.orders = orders
-        self.balances = balances
-        self.orders_being_placed = orders_being_placed
-        self.orders_being_cancelled = orders_being_cancelled
+    orders: List[Order]
+    balances: Dict[Token, float]
+    orders_being_placed: bool
+    orders_being_cancelled: bool
 
 
 @typechecked

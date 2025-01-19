@@ -1,8 +1,9 @@
 import pandas as pd
-from datetime import datetime
+import datetime
 from typing import Dict
 import glob
 import json
+import re
 
 from poly_market_maker.types import (
     MarketState,
@@ -14,65 +15,61 @@ from poly_market_maker.types import (
     Side,
 )
 from poly_market_maker.strategies.front_run_strategy import FrontRunStrategy
+from poly_market_maker.utils import setup_logging
 
 
 class MockStrategyManager:
     def __init__(self, config_path: str):
+        setup_logging("401705153")
         # Initialize strategy
         with open(config_path) as f:
             config = json.load(f)
         self.strategy = FrontRunStrategy(config)
 
         # Find and load CSV file
-        csv_pattern = f"game_data_{config['game_id']}.csv"
-        csv_files = glob.glob(csv_pattern)
-        if not csv_files:
-            raise FileNotFoundError(f"No CSV file found matching {csv_pattern}")
-
-        self.df = pd.read_csv(csv_files[0])
+        self.strategy_states = self.read_strategy_states()
 
         # Initialize account state
         self.balances = {Token.A: 0, Token.B: 0, Token.C: 1000}
         self.active_orders = []
         self.pnl_history = []
 
-    def _parse_row_to_state(self, row) -> SportsStrategyState:
-        """Convert a CSV row to SportsStrategyState"""
-        # Parse order book entries
-        bids = eval(row[f"{self.strategy.away_team}_Order_Book_Bids"])
-        asks = eval(row[f"{self.strategy.away_team}_Order_Book_Asks"])
+    def read_strategy_states(self):
+        """Read strategy states from CSV file"""
+        strategy_states = []
 
-        # Convert bid/ask prices and sizes to float
-        for bid in bids:
-            bid["price"] = float(bid["price"])
-            bid["size"] = float(bid["size"])
-        for ask in asks:
-            ask["price"] = float(ask["price"])
-            ask["size"] = float(ask["size"])
+        with open("game_data_401705153_updated.csv", "r") as f:
+            # Process file line by line
+            for line in f:
+                line = line.strip()
+                if not line:
+                    continue
 
-        market_state = MarketState(
-            timestamp=datetime.strptime(row["Timestamp"], "%Y-%m-%d %H:%M:%S"),
-            away_team_price=float(row[f"{self.strategy.away_team}_Price"]),
-            home_team_price=float(row[f"{self.strategy.home_team}_Price"]),
-            away_team_bids=[OrderBookEntry(**bid) for bid in bids],
-            away_team_asks=[OrderBookEntry(**ask) for ask in asks],
-            own_orders=OwnOrderBook(
-                orders=self.active_orders,
-                balances=self.balances,
-                orders_being_placed=False,
-                orders_being_cancelled=False,
-            ),
-        )
+                # Clean up own_orders references
+                line = re.sub(r"own_orders=<[^>]+>", "own_orders=None", line)
 
-        score_board = ScoreBoard(
-            away_score=int(row[f"{self.strategy.away_team}_Score"]),
-            home_score=int(row[f"{self.strategy.home_team}_Score"]),
-            game_time="NA",
-        )
+                try:
+                    state_dict: SportsStrategyState = eval(line)
+                    state_dict.market_state.own_orders = OwnOrderBook(
+                        orders=[],
+                        balances={Token.A: 0, Token.B: 0, Token.C: 1000},
+                        orders_being_placed=False,
+                        orders_being_cancelled=False,
+                    )
 
-        return SportsStrategyState(market_state=market_state, score_board=score_board)
+                    if state_dict.market_state.away_team_asks:
+                        strategy_states.append(state_dict)
+                    else:
+                        break
+                except Exception as e:
+                    print(f"Error processing line: {e}")
+                    continue
 
-    def _execute_orders(self, orders_to_place, orders_to_cancel):
+        return strategy_states
+
+    def _execute_orders(
+        self, orders_to_place, orders_to_cancel, state: SportsStrategyState
+    ):
         """Simulate order execution"""
         # Cancel orders
         for order in orders_to_cancel:
@@ -81,7 +78,23 @@ class MockStrategyManager:
 
         # Place and fill new orders
         for order in orders_to_place:
-            fill_price = order.price
+            # Use best price from order book for fills
+            if order.side == Side.BUY:
+                fill_price = (
+                    min(ask.price for ask in state.market_state.get_asks(order.token))
+                    if order.token == Token.A
+                    else min(
+                        ask.price for ask in state.market_state.get_asks(order.token)
+                    )
+                )
+            else:  # SELL
+                fill_price = (
+                    max(bid.price for bid in state.market_state.get_bids(order.token))
+                    if order.token == Token.A
+                    else max(
+                        bid.price for bid in state.market_state.get_bids(order.token)
+                    )
+                )
 
             # Update balances based on trade
             if order.side == Side.BUY:
@@ -98,16 +111,18 @@ class MockStrategyManager:
         print("Starting backtest...")
         print(f"Initial balances: {self.balances}")
 
-        for idx, row in self.df.iterrows():
-            # Convert row to strategy state
-            state = self._parse_row_to_state(row)
-
+        for idx, state in enumerate(self.strategy_states):
             # Get strategy orders
+            state.market_state.own_orders = OwnOrderBook(
+                orders=self.active_orders,
+                balances=self.balances,
+                orders_being_placed=False,
+                orders_being_cancelled=False,
+            )
             orders_to_place, orders_to_cancel = self.strategy.get_orders(state)
-            print("back test orders", orders_to_place, orders_to_cancel)
 
             # Execute orders
-            self._execute_orders(orders_to_place, orders_to_cancel)
+            self._execute_orders(orders_to_place, orders_to_cancel, state)
 
             # Record PnL
             total_value = (
@@ -123,15 +138,25 @@ class MockStrategyManager:
                 }
             )
 
-            if orders_to_place or orders_to_cancel:
-                print(f"\nTimestamp: {state.market_state.timestamp}")
+            best_bid = (
+                max(bid.price for bid in state.market_state.away_team_bids)
+                if state.market_state.away_team_bids
+                else None
+            )
+            best_ask = (
+                min(ask.price for ask in state.market_state.away_team_asks)
+                if state.market_state.away_team_asks
+                else None
+            )
+            try:
                 print(
-                    f"Scores: {state.score_board.away_score}-{state.score_board.home_score}"
+                    f"Time: {state.market_state.timestamp.strftime('%Y-%m-%d %H:%M:%S')} | Score: {None if state.score_board is None or state.score_board.away_score is None or state.score_board.home_score is None else f'{state.score_board.away_score}-{state.score_board.home_score}'} | "
+                    f"Best bid: {best_bid:.3f} | Best ask: {best_ask:.3f} | "
+                    f"Orders to place: {orders_to_place if orders_to_place else 'None'} | "
+                    f"Balances: {self.balances}"
                 )
-                print(f"Orders placed: {len(orders_to_place)}")
-                print(f"Orders cancelled: {len(orders_to_cancel)}")
-                print(f"Current balances: {self.balances}")
-                print(f"Portfolio value: {total_value}")
+            except TypeError:
+                print("One or more values are None")
 
         print("\nBacktest complete!")
         print(f"Final balances: {self.balances}")

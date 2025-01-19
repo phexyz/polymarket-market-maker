@@ -26,7 +26,7 @@ class AppFrontRun:
     """Sports betting front running on Polymarket CLOB"""
 
     def __init__(self, args: list):
-        setup_logging()
+        setup_logging(args.market_id)
         self.logger = logging.getLogger(__name__)
 
         args = get_args(args)
@@ -186,6 +186,7 @@ class AppFrontRun:
                 side=Side(order_dict["side"]),
                 token=self.market.token(order_dict["token_id"]),
                 id=order_dict["id"],
+                order_type=OrderType(order_dict["order_type"]),
             )
             for order_dict in orders
         ]

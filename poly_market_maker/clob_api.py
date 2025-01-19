@@ -70,7 +70,7 @@ class ClobApi:
 
         return None
 
-    def get_orders(self, condition_id: str):
+    def getorders(self, condition_id: str):
         """
         Get open keeper orders on the orderbook
         """
@@ -206,6 +206,7 @@ class ClobApi:
         side = order_dict.get("side")
         order_id = order_dict.get("id")
         token_id = int(order_dict.get("asset_id"))
+        order_type = OrderType(order_dict.get("order_type"))
 
         return {
             "size": size,
@@ -213,4 +214,5 @@ class ClobApi:
             "side": side,
             "token_id": token_id,
             "id": order_id,
+            "order_type": order_type,
         }

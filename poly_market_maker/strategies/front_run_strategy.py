@@ -1,6 +1,6 @@
 from dataclasses import dataclass
 from typing import Optional, Union, List, Dict
-import csv
+import pickle
 import time
 from poly_market_maker.strategies.base_strategy import BaseStrategy
 from poly_market_maker.gamma_api import GammaApi
@@ -38,27 +38,27 @@ class FrontRunStrategy(BaseStrategy):
         self.state: SportsStrategyState = None
         self.reset: OrderReset = None
         self.order_size = 10  # size * price needs to be greater than 1 dollar
-        self.reset_delay = 4
-        # Initialize CSV file
-        self.csv_filename = f"game_data_{self.game_id}_updated.csv"
-        self._initialize_csv()
+        self.reset_delay = 10
 
-    def _initialize_csv(self):
-        """Initialize CSV file"""
-        # Create file if it doesn't exist
+        # Initialize CSV file
+        self.json_filename = f"game_data_{self.game_id}_updated.json"
+        self._initialize_json()
+
+    def _initialize_json(self):
+        """Initialize pickle file"""
         try:
-            with open(self.csv_filename, "r"):
+            with open(self.json_filename, "rb"):
                 pass
         except FileNotFoundError:
-            with open(self.csv_filename, "w") as file:
-                pass
+            with open(self.json_filename, "wb") as file:
+                pickle.dump([], file)
 
-    def save_state_to_csv(self):
-        # Write state as a single line
-        with open(self.csv_filename, "a") as file:
-            # Log state before saving to CSV
-            self.logger.info(f"Saving state to CSV: {self.csv_filename}")
-            file.write(str(self.state) + "\n")
+    def save_state_to_file(self):
+        # Log state before saving
+        self.logger.debug(f"Saving state to pickle: {self.json_filename}")
+        # Append single state using pickle
+        with open(self.json_filename, "ab") as file:
+            pickle.dump(self.state, file)
 
     def _get_favored_token(
         self, old_state: SportsStrategyState, new_state: SportsStrategyState
@@ -233,7 +233,7 @@ class FrontRunStrategy(BaseStrategy):
         self.state = new_state
         self.state.market_state.set_orders_to_place(orders_to_place)
         self.state.market_state.set_orders_to_cancel(orders_to_cancel)
-        self.save_state_to_csv()
+        self.save_state_to_file()
 
         return orders_to_place, orders_to_cancel
 

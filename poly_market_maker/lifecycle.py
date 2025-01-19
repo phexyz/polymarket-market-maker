@@ -292,7 +292,6 @@ class Lifecycle:
         signal.signal(signal.SIGTERM, self._sigint_sigterm_handler)
 
         while self._at_least_one_every:
-            time.sleep(1)
 
             # if the keeper logic asked us to terminate, we do so
             if self.terminated_internally:

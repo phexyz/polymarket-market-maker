@@ -1,9 +1,9 @@
 import logging
+from logging import config
 import math
 import os
 import random
 import yaml
-from logging import config
 from web3 import Web3
 from web3.middleware import (
     geth_poa_middleware,
@@ -16,9 +16,7 @@ from web3.gas_strategies.time_based import fast_gas_price_strategy
 
 
 def setup_logging(
-    log_path="logging.yaml",
-    log_level=logging.INFO,
-    env_key="LOGGING_CONFIG_FILE",
+    market_id: str,
 ):
     """
     :param default_path:
@@ -26,20 +24,65 @@ def setup_logging(
     :param env_key:
     :return:
     """
-    log_value = os.getenv(env_key, None)
-    if log_value:
-        log_path = log_value
-    if os.path.exists(log_path):
-        with open(log_path) as fh:
-            config.dictConfig(yaml.safe_load(fh.read()))
-        logging.getLogger(__name__).info("Logging configured with config file!")
-    else:
-        logging.basicConfig(
-            format="%(asctime)-15s %(levelname)-4s-%(threadName)s-%(filename)s:%(lineno)d %(message)s",
-            level=log_level,
-        )
-        logging.getLogger(__name__).info("Logging configured with default attributes!")
+
+    log_config = {
+        "version": 1,
+        "disable_existing_loggers": False,
+        "formatters": {
+            "simple": {
+                "format": "%(asctime)-15s %(levelname)-4s-%(filename)s:%(lineno)d %(message)s"
+            }
+        },
+        "handlers": {
+            "console": {
+                "class": "logging.StreamHandler",
+                "level": "DEBUG",
+                "formatter": "simple",
+                "stream": "ext://sys.stdout",
+            },
+            "info_file_handler": {
+                "class": "logging.handlers.RotatingFileHandler",
+                "level": "INFO",
+                "formatter": "simple",
+                "filename": f"logs/INFO_{market_id}.log",
+                "maxBytes": 10485760,
+                "backupCount": 20,
+                "encoding": "utf8",
+            },
+            "error_file_handler": {
+                "class": "logging.handlers.RotatingFileHandler",
+                "level": "ERROR",
+                "formatter": "simple",
+                "filename": f"logs/ERROR_{market_id}.log",
+                "maxBytes": 10485760,
+                "backupCount": 20,
+                "encoding": "utf8",
+            },
+            "debug_file_handler": {
+                "class": "logging.handlers.RotatingFileHandler",
+                "level": "DEBUG",
+                "formatter": "simple",
+                "filename": f"logs/DEBUG_{market_id}.log",
+                "maxBytes": 10485760,
+                "backupCount": 20,
+                "encoding": "utf8",
+            },
+        },
+        "root": {
+            "level": "DEBUG",
+            "handlers": [
+                "console",
+                "info_file_handler",
+                "error_file_handler",
+                "debug_file_handler",
+            ],
+        },
+    }
+
+    # Now apply this configuration.
+    logging.config.dictConfig(log_config)
     # Suppress requests and web3 verbose logs
+    logging.getLogger(__name__).info(f"Logging configured with {market_id}!")
     logging.getLogger("requests").setLevel(logging.INFO)
     logging.getLogger("web3").setLevel(logging.INFO)
 
