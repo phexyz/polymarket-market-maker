@@ -175,13 +175,13 @@ class StrategyManager:
                 return
 
             # Get orders based on current market state
-            orders_to_cancel, orders_to_place = self.strategy.get_orders(external_state)
+            orders_to_place, orders_to_cancel = self.strategy.get_orders(external_state)
 
             self.logger.info(f"Orders to cancel: {len(orders_to_cancel)}")
             self.logger.info(f"Orders to place: {len(orders_to_place)}")
 
-            # self.cancel_orders(orders_to_cancel)
-            # self.place_orders(orders_to_place)
+            self.cancel_orders(orders_to_cancel)
+            self.place_orders(orders_to_place)
 
         except Exception as e:
             self.logger.error(f"Error in synchronize: {e}")

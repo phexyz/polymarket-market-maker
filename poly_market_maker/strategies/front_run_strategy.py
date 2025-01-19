@@ -37,8 +37,8 @@ class FrontRunStrategy(BaseStrategy):
         # Initialize score state
         self.state: SportsStrategyState = None
         self.reset: OrderReset = None
-        self.order_size = 1000.0
-        self.reset_delay = 3
+        self.order_size = 10  # size * price needs to be greater than 1 dollar
+        self.reset_delay = 4
         # Initialize CSV file
         self.csv_filename = f"game_data_{self.game_id}_updated.csv"
         self._initialize_csv()
@@ -87,7 +87,15 @@ class FrontRunStrategy(BaseStrategy):
         diff_in_diff = abs(new_diff - old_diff)
         diff_pct = diff_in_diff * 1.0 / old_diff if old_diff > 0 else 1
 
-        if diff_in_diff >= 2 and diff_pct >= 0.3:
+        # Print all the score differences
+        self.logger.info(f"Away score diff: {away_diff}")
+        self.logger.info(f"Home score diff: {home_diff}")
+        self.logger.info(f"Old score diff: {old_diff}")
+        self.logger.info(f"New score diff: {new_diff}")
+        self.logger.info(f"Score difference change: {diff_in_diff}")
+        self.logger.info(f"Score difference change percentage: {diff_pct}")
+
+        if diff_in_diff >= 2 and diff_pct >= 0.1:
             if away_diff > 0:
                 return Token.A
             elif home_diff > 0:
@@ -106,10 +114,13 @@ class FrontRunStrategy(BaseStrategy):
         price = state.market_state.get_best_limit_price(token=token, side=side)
         order_type = OrderType.GTC
 
-        if price == None:
+        if side == Side.SELL:
+            price = 0.01
+            order_type = OrderType.FOK
+        elif price == None:
             if default_to_FOK:
                 order_type = OrderType.FOK
-                price = 0.0 if side == Side.SELL else 1.0
+                price = 0.99
             else:
                 return None
 
@@ -192,11 +203,13 @@ class FrontRunStrategy(BaseStrategy):
             self.logger.info(
                 f"Processing reset: token={self.reset.token.value}, "
                 f"size={self.reset.size}, "
-                f"trigger_time={self.reset.trigger_timestamp}"
+                f"trigger_time={self.reset.trigger_timestamp}, "
+                f"reset_timestamp={self.reset.trigger_timestamp}, "
+                f"market_timestamp={new_state.market_state.timestamp}, "
+                f"comparison_result={self.reset.trigger_timestamp <= new_state.market_state.timestamp}"
             )
         else:
             self.logger.info("No reset to process")
-
         # if there are any existing reset
         if (
             self.reset

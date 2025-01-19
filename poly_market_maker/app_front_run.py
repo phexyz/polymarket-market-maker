@@ -134,7 +134,6 @@ class AppFrontRun:
         """
         Fetch the onchain balances of collateral and conditional tokens for the keeper
         """
-        self.logger.debug(f"Getting balances for address: {self.address}")
 
         collateral_balance = self.contracts.token_balance_of(
             self.clob_api.get_collateral_address(), self.address
@@ -233,7 +232,7 @@ class AppFrontRun:
         if balance_diff > 0:
             clearing_order = Order(
                 size=balance_diff,
-                price=0.5,
+                price=0.01,
                 side=Side.SELL,
                 token=larger_token,
                 order_type=OrderType.FOK,

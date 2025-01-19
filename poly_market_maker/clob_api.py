@@ -99,7 +99,7 @@ class ClobApi:
         Places a new order
         """
         self.logger.info(
-            f"Placing a new order: Order[price={price},size={size},side={side},token_id={token_id}]"
+            f"Placing a new order: Order[price={price},size={size},side={side},token_id={token_id},order_type={order_type}]"
         )
         start_time = time.time()
         try:
@@ -114,7 +114,7 @@ class ClobApi:
             if resp and resp.get("success") and resp.get("orderID"):
                 order_id = resp.get("orderID")
                 self.logger.info(
-                    f"Succesfully placed new order: Order[id={order_id},price={price},size={size},side={side},tokenID={token_id}]!"
+                    f"Succesfully placed new order: Order[id={order_id},price={price},size={size},side={side},tokenID={token_id},order_type={order_type}]!"
                 )
                 return order_id
 
@@ -148,36 +148,6 @@ class ClobApi:
                 (time.time() - start_time)
             )
         return False
-
-    def place_FOK_order(
-        self, price: float, size: float, side: str, token_id: int
-    ) -> str:
-        self.logger.info(
-            f"Placing a new market order: Order[price={price},size={size},side={side},token_id={token_id}]"
-        )
-        start_time = time.time()
-        try:
-            clob_requests_latency.labels(
-                method="create_and_post_order", status="ok"
-            ).observe((time.time() - start_time))
-            order_id = None
-            if resp and resp.get("success") and resp.get("orderID"):
-                order_id = resp.get("orderID")
-                self.logger.info(
-                    f"Succesfully placed new order: Order[id={order_id},price={price},size={size},side={side},tokenID={token_id}]!"
-                )
-                return order_id
-
-            err_msg = resp.get("errorMsg")
-            self.logger.error(
-                f"Could not place new order! CLOB returned error: {err_msg}"
-            )
-        except Exception as e:
-            self.logger.error(f"Request exception: failed placing new order: {e}")
-            clob_requests_latency.labels(
-                method="create_and_post_order", status="error"
-            ).observe((time.time() - start_time))
-        return None
 
     def cancel_all_orders(self) -> bool:
         self.logger.info("Cancelling all open keeper orders..")
