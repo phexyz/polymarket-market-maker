@@ -26,10 +26,13 @@ class AppFrontRun:
     """Sports betting front running on Polymarket CLOB"""
 
     def __init__(self, args: list):
-        setup_logging(args.market_id)
-        self.logger = logging.getLogger(__name__)
-
         args = get_args(args)
+        with open(args.strategy_config) as fh:
+            strategy_config = json.load(fh)
+        setup_logging(strategy_config["game_id"])
+        self.logger = logging.getLogger(__name__)
+        self.logger.info(f"Strategy config: {strategy_config}")
+
         self.sync_interval = 0.5
 
         # self.min_tick = args.min_tick
@@ -61,7 +64,9 @@ class AppFrontRun:
             querystring_params={"id": args.market_id}
         )[0]
 
-        self.order_book_manager = OrderManager(args.refresh_frequency, max_workers=1)
+        self.order_book_manager = OrderManager(
+            refresh_frequency=self.sync_interval, max_workers=2
+        )
         self.order_book_manager.get_orders_with(self.get_orders)
         self.order_book_manager.get_balances_with(self.get_balances)
         self.order_book_manager.cancel_orders_with(
@@ -74,10 +79,6 @@ class AppFrontRun:
         )
         # self.order_book_manager.clear_all_positions_with(self.clear_all_positions)
         self.order_book_manager.start()
-
-        with open(args.strategy_config) as fh:
-            strategy_config = json.load(fh)
-        self.logger.info(f"Strategy config: {strategy_config}")
 
         self.strategy_manager = StrategyManager(
             args.strategy,
@@ -122,8 +123,12 @@ class AppFrontRun:
         Shut down the keeper
         """
         self.logger.info("Keeper shutting down...")
+        self.logger.info("Cancelling all orders...")
         self.order_book_manager.cancel_all_orders()
+        self.logger.info("Cancelling all orders complete!")
+        self.logger.info("Clearing all positions...")
         self.clear_all_positions_orders()
+        self.logger.info("Clearing all positions complete!")
         self.logger.info("Keeper is shut down!")
 
     """
@@ -192,6 +197,7 @@ class AppFrontRun:
         ]
 
     def place_order(self, new_order: Order) -> Order:
+        self.logger.info(f"Placing order: {new_order}")
         order_id = self.clob_api.place_order(
             price=new_order.price,
             size=new_order.size,

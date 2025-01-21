@@ -18,7 +18,7 @@ class OrderManager:
     def __init__(self, refresh_frequency: int, max_workers: int = 5):
         self.logger = logging.getLogger(self.__class__.__name__)
 
-        assert isinstance(refresh_frequency, int)
+        assert isinstance(refresh_frequency, float)
         assert isinstance(max_workers, int)
 
         self.refresh_frequency = refresh_frequency
@@ -182,6 +182,7 @@ class OrderManager:
             place_order_function: Function used to place the order.
         """
         assert callable(place_order_function)
+        self.logger.info(f"Placing order: {order}")
 
         with self._lock:
             self._currently_placing_orders += 1
@@ -293,6 +294,7 @@ class OrderManager:
 
     def wait_for_order_book_refresh(self):
         """Wait until at least one background order book refresh happens since now."""
+        self.logger.info("Waiting for order book refresh...")
         with self._lock:
             old_counter = self._refresh_count
 
@@ -343,8 +345,11 @@ class OrderManager:
 
     def _thread_refresh_order_book(self):
         while True:
+            self.logger.info("Refreshing order book...")
             try:
+                self.logger.info("Locking order book...")
                 with self._lock:
+                    self.logger.info("Locking order book complete!")
                     orders_already_cancelled_before = set(self._order_ids_cancelled)
                     orders_already_placed_before = set(self._orders_placed)
 
@@ -410,6 +415,7 @@ class OrderManager:
                     self._currently_placing_orders -= 1
                 self._report_order_book_updated()
 
+        self.logger.debug(f"Executing order placement in thread: {order}")
         return func
 
     def _thread_cancel_order(

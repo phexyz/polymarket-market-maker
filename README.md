@@ -118,3 +118,9 @@ if favorable score change happen before the next time stamp hits, renew the time
 if unfavorable score change happens before the next tiem stamp hits, consume the cached function. do the same algorithm on the other side
 
 always try to sell
+
+BUG:
+
+1. canceling order order id is None
+2. not sure why resetting orders are not going through
+3. balacnae allowce error

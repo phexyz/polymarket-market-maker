@@ -77,22 +77,42 @@ class GammaApi:
                 'Cannot use "parse_pydantic" and "local_file" params simultaneously.'
             )
 
-        response = httpx.get(self.gamma_markets_endpoint, params=querystring_params)
-        if response.status_code == 200:
-            data = response.json()
-            if local_file_path is not None:
-                with open(local_file_path, "w+") as out_file:
-                    json.dump(data, out_file)
-            elif not parse_pydantic:
-                return data
+        all_markets = []
+        next_cursor = ""
+
+        while True:
+            # Add cursor to params if not empty
+            if next_cursor:
+                querystring_params["cursor"] = next_cursor
+
+            response = httpx.get(self.gamma_markets_endpoint, params=querystring_params)
+            if response.status_code == 200:
+                response_data = response.json()
+
+                if local_file_path is not None:
+                    with open(local_file_path, "w+") as out_file:
+                        json.dump(response_data, out_file)
+                    break
+
+                if not parse_pydantic:
+                    return response_data
+
+                # Parse and add markets from current page
+                for market_object in response_data:
+                    all_markets.append(self.parse_pydantic_market(market_object))
+
+                # Check if we've reached the end
+                try:
+                    next_cursor = response_data.get("next_cursor")
+                except Exception as err:
+                    print(f"Failed to get next cursor: {err}")
+                    break
+
             else:
-                markets: list[Market] = []
-                for market_object in data:
-                    markets.append(self.parse_pydantic_market(market_object))
-                return markets
-        else:
-            print(f"Error response returned from api: HTTP {response.status_code}")
-            raise Exception()
+                print(f"Error response returned from api: HTTP {response.status_code}")
+                raise Exception()
+
+        return all_markets
 
     def get_events(
         self, querystring_params={}, parse_pydantic=False, local_file_path=None
@@ -180,52 +200,3 @@ class GammaApi:
         print(url)
         response = httpx.get(url)
         return response.json()
-
-    def get_current_nba_markets(self) -> "list[Market]":
-
-        start_date_min = (
-            (datetime.now() - timedelta(days=7))
-            .replace(hour=0, minute=0, second=0, microsecond=0)
-            .strftime("%Y-%m-%dT%H:%M:%SZ")
-        )
-
-        querystring_params = {
-            "start_date_min": start_date_min,
-            "active": True,
-            "close": False,
-            "limit": 1000,
-        }
-
-        print(querystring_params)
-
-        markets = self.get_markets(
-            querystring_params=querystring_params, parse_pydantic=True
-        )
-
-        # Current datetime
-        current_time = datetime.now()
-        current_date = current_time.date()
-
-        def is_current_nba_market(mkt: Market):
-            if not mkt.description:
-                return False
-            if "nba" not in mkt.slug:
-                return False
-            start_time_pattern = r"(\w+ \d+ at \d{1,2}:\d{2}[AP]M ET)"
-            match = re.search(start_time_pattern, mkt.description)
-            if match:
-                start_time_str = match.group(1)
-                # Convert to datetime format
-                start_time_str = (
-                    start_time_str.replace(" at", "").replace(" ET", "") + " 2025"
-                )
-                event_time = datetime.strptime(start_time_str, "%B %d %I:%M%p %Y")
-                # Check if event is on the target date and after the current time
-                return event_time.date() == current_date
-            return False
-
-        # Use filter to find valid events
-        filtered_markets = filter(lambda mkt: is_current_nba_market(mkt), markets)
-
-        # Convert to list to display results
-        return list(filtered_markets)

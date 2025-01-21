@@ -177,9 +177,6 @@ class StrategyManager:
             # Get orders based on current market state
             orders_to_place, orders_to_cancel = self.strategy.get_orders(external_state)
 
-            self.logger.info(f"Orders to cancel: {len(orders_to_cancel)}")
-            self.logger.info(f"Orders to place: {len(orders_to_place)}")
-
             self.cancel_orders(orders_to_cancel)
             self.place_orders(orders_to_place)
 
@@ -198,5 +195,7 @@ class StrategyManager:
 
     def place_orders(self, orders_to_place):
         if len(orders_to_place) > 0:
-            self.logger.info(f"About to place {len(orders_to_place)} new orders!")
+            self.logger.info(
+                f"About to place {len(orders_to_place)} new orders! Orders to place: {orders_to_place}"
+            )
             self.order_manager.place_orders(orders_to_place)

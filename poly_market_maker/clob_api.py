@@ -70,7 +70,7 @@ class ClobApi:
 
         return None
 
-    def getorders(self, condition_id: str):
+    def get_orders(self, condition_id: str):
         """
         Get open keeper orders on the orderbook
         """
@@ -106,11 +106,16 @@ class ClobApi:
             order = self.client.create_order(
                 OrderArgs(price=price, size=size, side=side, token_id=token_id)
             )
+            self.logger.info(f"create order resp: {order}")
             resp = self.client.post_order(order, orderType=order_type)
             clob_requests_latency.labels(
                 method="create_and_post_order", status="ok"
             ).observe((time.time() - start_time))
             order_id = None
+            self.logger.info(f"post order resp: {resp}")
+            if resp:
+                for key, value in resp.items():
+                    self.logger.info(f"Response {key}: {value}")
             if resp and resp.get("success") and resp.get("orderID"):
                 order_id = resp.get("orderID")
                 self.logger.info(
@@ -132,7 +137,7 @@ class ClobApi:
     def cancel_order(self, order_id) -> bool:
         self.logger.info(f"Cancelling order {order_id}...")
         if order_id is None:
-            self.logger.debug("Invalid order_id")
+            self.logger.error("Invalid order_id")
             return True
 
         start_time = time.time()

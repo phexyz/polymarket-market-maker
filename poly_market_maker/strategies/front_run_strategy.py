@@ -37,28 +37,28 @@ class FrontRunStrategy(BaseStrategy):
         # Initialize score state
         self.state: SportsStrategyState = None
         self.reset: OrderReset = None
+        self.orders_to_place = []
+        self.orders_to_cancel = []
         self.order_size = 10  # size * price needs to be greater than 1 dollar
-        self.reset_delay = 10
+        self.reset_delay = 4
 
         # Initialize CSV file
-        self.json_filename = f"game_data_{self.game_id}_updated.json"
-        self._initialize_json()
-
-    def _initialize_json(self):
-        """Initialize pickle file"""
-        try:
-            with open(self.json_filename, "rb"):
-                pass
-        except FileNotFoundError:
-            with open(self.json_filename, "wb") as file:
-                pickle.dump([], file)
+        self.json_filename = f"game_data_{self.game_id}.pkl"
 
     def save_state_to_file(self):
         # Log state before saving
         self.logger.debug(f"Saving state to pickle: {self.json_filename}")
         # Append single state using pickle
         with open(self.json_filename, "ab") as file:
-            pickle.dump(self.state, file)
+            pickle.dump(
+                {
+                    "state": self.state,
+                    "reset": self.reset,
+                    "orders_to_place": self.orders_to_place,
+                    "orders_to_cancel": self.orders_to_cancel,
+                },
+                file,
+            )
 
     def _get_favored_token(
         self, old_state: SportsStrategyState, new_state: SportsStrategyState
@@ -139,6 +139,8 @@ class FrontRunStrategy(BaseStrategy):
         Process current market state and collect game data
         Returns: Empty orders since this is a data collection strategy
         """
+        self.logger.info(f"Processing new state: {new_state}")
+
         orders_to_place = []
         orders_to_cancel = []
 
@@ -180,6 +182,9 @@ class FrontRunStrategy(BaseStrategy):
                     orders_to_place_from_reset, orders_to_cancel_from_reset = (
                         self.consume_reset(self.reset, new_state)
                     )
+                    orders_to_cancel.extend(
+                        self.cancel_all_open_orders(new_state, self.reset.token)
+                    )
                     orders_to_place.extend(orders_to_place_from_reset)
                     orders_to_cancel.extend(orders_to_cancel_from_reset)
                     self.logger.info(
@@ -201,7 +206,7 @@ class FrontRunStrategy(BaseStrategy):
         # Log reset processing status
         if self.reset:
             self.logger.info(
-                f"Processing reset: token={self.reset.token.value}, "
+                f"Current reset: token={self.reset.token.value}, "
                 f"size={self.reset.size}, "
                 f"trigger_time={self.reset.trigger_timestamp}, "
                 f"reset_timestamp={self.reset.trigger_timestamp}, "
@@ -231,11 +236,18 @@ class FrontRunStrategy(BaseStrategy):
 
         # Update state
         self.state = new_state
-        self.state.market_state.set_orders_to_place(orders_to_place)
-        self.state.market_state.set_orders_to_cancel(orders_to_cancel)
+        self.orders_to_place = orders_to_place
+        self.orders_to_cancel = orders_to_cancel
         self.save_state_to_file()
 
         return orders_to_place, orders_to_cancel
+
+    def cancel_all_open_orders(self, state: SportsStrategyState, token: Token):
+        orders_to_cancel = []
+        for active_order in state.market_state.own_orders.orders:
+            if active_order.token == token:
+                orders_to_cancel.append(active_order)
+        return [], orders_to_cancel
 
     def consume_reset(self, reset: OrderReset, state: SportsStrategyState):
         target_token = reset.token
@@ -252,8 +264,5 @@ class FrontRunStrategy(BaseStrategy):
 
         orders_to_cancel = []
 
-        for active_order in state.market_state.own_orders.orders:
-            if active_order.token == target_token:
-                orders_to_cancel.append(active_order)
-
+        # TODO BUG we don't have to cancel all the open orders
         return orders_to_place, orders_to_cancel

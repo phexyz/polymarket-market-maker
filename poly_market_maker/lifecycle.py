@@ -274,14 +274,15 @@ class Lifecycle:
                         self.logger.debug(
                             f"Ignoring timer #{idx} as previous one is already running"
                         )
+                    setup_timer(frequency_in_seconds)
                 else:
                     self.logger.debug(
                         f"Ignoring timer #{idx} as keeper is already terminating"
                     )
             except:
-                setup_timer(frequency_in_seconds)
+                if not self.terminated_internally and not self.terminated_externally:
+                    setup_timer(frequency_in_seconds)
                 raise
-            setup_timer(frequency_in_seconds)
 
         setup_timer(1)
         self._at_least_one_every = True

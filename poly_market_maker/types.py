@@ -307,9 +307,6 @@ class MarketState:
     # Our own orders and balances
     own_orders: OwnOrderBook
 
-    orders_to_place = None
-    orders_to_cancel = None
-
     # Market summary stats
     away_team_mid_price: float = None
     home_team_mid_price: float = None

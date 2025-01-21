@@ -16,7 +16,7 @@ from web3.gas_strategies.time_based import fast_gas_price_strategy
 
 
 def setup_logging(
-    market_id: str,
+    id: str,
 ):
     """
     :param default_path:
@@ -30,7 +30,7 @@ def setup_logging(
         "disable_existing_loggers": False,
         "formatters": {
             "simple": {
-                "format": "%(asctime)-15s %(levelname)-4s-%(filename)s:%(lineno)d %(message)s"
+                "format": "%(asctime)-15s %(levelname)-4s %(threadName)s  %(filename)s:%(lineno)d %(message)s"
             }
         },
         "handlers": {
@@ -40,29 +40,11 @@ def setup_logging(
                 "formatter": "simple",
                 "stream": "ext://sys.stdout",
             },
-            "info_file_handler": {
-                "class": "logging.handlers.RotatingFileHandler",
-                "level": "INFO",
-                "formatter": "simple",
-                "filename": f"logs/INFO_{market_id}.log",
-                "maxBytes": 10485760,
-                "backupCount": 20,
-                "encoding": "utf8",
-            },
-            "error_file_handler": {
-                "class": "logging.handlers.RotatingFileHandler",
-                "level": "ERROR",
-                "formatter": "simple",
-                "filename": f"logs/ERROR_{market_id}.log",
-                "maxBytes": 10485760,
-                "backupCount": 20,
-                "encoding": "utf8",
-            },
             "debug_file_handler": {
                 "class": "logging.handlers.RotatingFileHandler",
                 "level": "DEBUG",
                 "formatter": "simple",
-                "filename": f"logs/DEBUG_{market_id}.log",
+                "filename": f"logs/{id}.log",
                 "maxBytes": 10485760,
                 "backupCount": 20,
                 "encoding": "utf8",
@@ -72,8 +54,6 @@ def setup_logging(
             "level": "DEBUG",
             "handlers": [
                 "console",
-                "info_file_handler",
-                "error_file_handler",
                 "debug_file_handler",
             ],
         },
@@ -82,7 +62,7 @@ def setup_logging(
     # Now apply this configuration.
     logging.config.dictConfig(log_config)
     # Suppress requests and web3 verbose logs
-    logging.getLogger(__name__).info(f"Logging configured with {market_id}!")
+    logging.getLogger(__name__).info(f"Logging configured with {id}!")
     logging.getLogger("requests").setLevel(logging.INFO)
     logging.getLogger("web3").setLevel(logging.INFO)
 
